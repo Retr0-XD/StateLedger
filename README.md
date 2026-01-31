@@ -389,6 +389,39 @@ go build -o stateledger ./cmd/stateledger
 ./stateledger append --type code --source orders-service --payload-json '{"commit":"a7c91e"}'
 ```
 
+### Collect (validated payloads)
+
+```
+./stateledger collect --kind code --payload-json '{"repo":"orders","commit":"a7c91e"}'
+./stateledger collect --kind config --payload-json '{"source":"env","version":"1","hash":"sha256:...","snapshot":"KEY=VALUE"}'
+./stateledger collect --kind environment --payload-json '{"os":"linux","runtime":"go1.25","arch":"amd64","time_source":"system"}'
+```
+
+### Capture (real collectors — Git, Env, Config)
+
+```
+./stateledger capture --kind code --path .
+./stateledger capture --kind environment --path ""
+./stateledger capture --kind config --path config.json
+```
+
+### Manifest (batch capture)
+
+Create a manifest:
+```
+./stateledger manifest create --name "my-app" --output manifest.json
+```
+
+Edit `manifest.json` as needed, then run:
+```
+./stateledger manifest run --file manifest.json --db data/ledger.db
+```
+
+Show manifest:
+```
+./stateledger manifest show --file manifest.json
+```
+
 ### Query records
 
 ```
@@ -414,6 +447,9 @@ go build -o stateledger ./cmd/stateledger
 | Command | Purpose |
 | --- | --- |
 | `init` | Initialize the SQLite ledger and artifact store. |
+| `collect` | Validate collector payloads and append to the ledger. |
+| `capture` | Execute real collectors (Git, Env, Config) and output payload. |
+| `manifest` | Create, show, and run batch capture manifests. |
 | `append` | Append an immutable record to the ledger. |
 | `query` | Fetch records by ID or time range. |
 | `verify` | Verify the hash chain integrity. |
@@ -421,11 +457,31 @@ go build -o stateledger ./cmd/stateledger
 
 ---
 
-## Notes
+## Architecture (MVP Implementation)
 
-- The ledger is append-only and uses a hash chain to detect tampering.
-- Artifact storage is local and content-addressed by SHA-256 checksum.
-- This MVP does not attempt full system reconstruction yet — it focuses on **capture + integrity**.
+**StateLedger Core:**
+- Append-only SQLite ledger with hash chain integrity
+- Immutable record storage (code, config, environment, mutations)
+- Verification via VerifyChain (detects tampering)
+
+**Collectors (Real Implementations):**
+- Code Collector: Extracts Git repo name, commit hash via `git` CLI
+- Environment Collector: Captures OS, runtime, arch via `runtime` package
+- Config Collector: Reads file snapshots and computes SHA-256 hash
+- Mutation Collector: Records external references (Kafka offsets, DB tx IDs)
+
+**Manifest Format:**
+- JSON-based declarative batch capture specification
+- Versioning for schema compatibility
+- Pluggable collector parameters
+
+**CLI:**
+- `collect` — validate and ingest structured payloads
+- `capture` — invoke real collectors automatically
+- `manifest` — batch capture workflows
+- `query/verify` — ledger inspection and integrity checks
+
+---
 
 ---
 
