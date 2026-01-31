@@ -12,6 +12,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Docker Hub repository
+        run: |
+          if [ -z "${{ secrets.DOCKERHUB_REPO }}" ]; then
+            echo "Missing DOCKERHUB_REPO secret (e.g. yourname/stateledger)"
+            exit 1
+          fi
+        env:
+          DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
