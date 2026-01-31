@@ -1,3 +1,148 @@
+# StateLedger
+
+Deterministic system state reconstruction with cryptographic integrity proofs. Capture code, configuration, environment, and mutations into an append-only ledger, then reconstruct and audit state at any point in time.
+
+---
+
+## What it does
+
+- **Capture** system state (code/config/environment/mutations)
+- **Store** in an immutable, append-only ledger
+- **Verify** integrity via SHA-256 hash chains
+- **Reconstruct** state at time T
+- **Export** audit bundles for compliance
+
+---
+
+## Quick start (local)
+
+Build:
+
+```bash
+go build -o stateledger ./cmd/stateledger
+```
+
+Initialize:
+
+```bash
+./stateledger init --db data/ledger.db --artifacts artifacts
+```
+
+Capture + collect environment:
+
+```bash
+./stateledger capture -kind environment -path /tmp | jq -c '.payload' | \
+  xargs -I {} ./stateledger collect --db data/ledger.db --kind environment --payload-json '{}'
+```
+
+Verify + snapshot:
+
+```bash
+./stateledger verify --db data/ledger.db
+./stateledger snapshot --db data/ledger.db
+```
+
+Export audit bundle:
+
+```bash
+./stateledger audit --db data/ledger.db --out audit.json
+```
+
+---
+
+## CLI commands
+
+| Command | Purpose |
+| --- | --- |
+| `init` | Initialize ledger DB and artifacts store |
+| `capture` | Run collectors (code/config/environment) |
+| `collect` | Validate and append payloads |
+| `manifest` | Batch capture (create/run/show) |
+| `append` | Append record directly |
+| `query` | Query ledger records |
+| `verify` | Verify hash chain integrity |
+| `snapshot` | Reconstruct state at time T |
+| `advisory` | Determinism analysis | 
+| `audit` | Export audit bundle |
+| `artifact put` | Store artifact by checksum |
+
+---
+
+## Docker & Kubernetes usage
+
+Yes — this project works well as a **batch job** in Kubernetes. It is designed to run as a **CLI or Job/CronJob**, not as a long-running server. Typical integration:
+
+1. Use a **PVC** for the ledger DB and artifacts directory.
+2. Run a **Job/CronJob** to capture state and export audits.
+3. Store `ledger.db` and audit bundles in durable storage.
+
+Example Kubernetes job: [examples/kubernetes-job.yaml](examples/kubernetes-job.yaml)
+
+---
+
+## Docker image
+
+This repo supports building and pushing a Docker image to Docker Hub using GitHub Actions.
+
+### Required GitHub Secrets
+
+Set these in your repo settings:
+
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
+- `DOCKERHUB_REPO` (e.g. `yourname/stateledger`)
+
+### Build and Push (CI)
+
+The workflow builds and pushes images on every push to `main`:
+
+- `latest`
+- `sha-<commit>`
+
+---
+
+## Integration patterns
+
+### CI/CD
+
+- Capture environment + code during builds
+- Export audit bundles
+- Store artifacts with checksums
+
+See: [examples/github-actions.yml](examples/github-actions.yml)
+
+### Docker builds
+
+Capture build state during image creation:
+
+See: [examples/docker-build.sh](examples/docker-build.sh)
+
+---
+
+## Determinism and reproducibility
+
+StateLedger computes a **determinism score (0–100)** based on how complete the captured state is. Missing code/config/environment lowers reproducibility.
+
+Use:
+
+```bash
+./stateledger advisory --db data/ledger.db
+```
+
+---
+
+## Documentation
+
+- Quickstart: [QUICKSTART.md](QUICKSTART.md)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Status: [STATUS.md](STATUS.md)
+- Examples: [examples/README.md](examples/README.md)
+
+---
+
+## License
+
+Apache 2.0 — see [LICENSE](LICENSE).
 
 # StateLedger
 
