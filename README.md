@@ -366,6 +366,69 @@ Contributions welcome — especially:
 
 ---
 
+## Quickstart (Local, Self-Contained)
+
+StateLedger is intentionally built to run on any system with Go installed.
+It uses a **pure-Go SQLite driver** that is vendored in this repository to avoid external system dependencies.
+
+### Build
+
+```
+go build -o stateledger ./cmd/stateledger
+```
+
+### Initialize
+
+```
+./stateledger init --db data/ledger.db --artifacts artifacts
+```
+
+### Append a record
+
+```
+./stateledger append --type code --source orders-service --payload-json '{"commit":"a7c91e"}'
+```
+
+### Query records
+
+```
+./stateledger query --since 0 --limit 100
+```
+
+### Verify ledger integrity
+
+```
+./stateledger verify
+```
+
+### Store an artifact
+
+```
+./stateledger artifact put --file ./path/to/artifact.bin
+```
+
+---
+
+## CLI Commands
+
+| Command | Purpose |
+| --- | --- |
+| `init` | Initialize the SQLite ledger and artifact store. |
+| `append` | Append an immutable record to the ledger. |
+| `query` | Fetch records by ID or time range. |
+| `verify` | Verify the hash chain integrity. |
+| `artifact put` | Store an artifact by checksum. |
+
+---
+
+## Notes
+
+- The ledger is append-only and uses a hash chain to detect tampering.
+- Artifact storage is local and content-addressed by SHA-256 checksum.
+- This MVP does not attempt full system reconstruction yet — it focuses on **capture + integrity**.
+
+---
+
 ## License
 
 Apache 2.0
