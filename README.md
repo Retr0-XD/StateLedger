@@ -422,6 +422,24 @@ Show manifest:
 ./stateledger manifest show --file manifest.json
 ```
 
+### Snapshot (reconstruction summary)
+
+```
+./stateledger snapshot --db data/ledger.db --time 0
+```
+
+### Advisory (determinism analysis)
+
+```
+./stateledger advisory --db data/ledger.db --time 0
+```
+
+### Audit Bundle (export)
+
+```
+./stateledger audit --db data/ledger.db --time 0 --out audit.json
+```
+
 ### Query records
 
 ```
@@ -453,6 +471,9 @@ Show manifest:
 | `append` | Append an immutable record to the ledger. |
 | `query` | Fetch records by ID or time range. |
 | `verify` | Verify the hash chain integrity. |
+| `snapshot` | Resolve and summarize state at a given time. |
+| `advisory` | Run determinism advisory analysis for a time range. |
+| `audit` | Export a snapshot + proof bundle for auditing. |
 | `artifact put` | Store an artifact by checksum. |
 
 ---

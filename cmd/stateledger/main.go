@@ -37,6 +37,12 @@ func main() {
 		runQuery(os.Args[2:])
 	case "verify":
 		runVerify(os.Args[2:])
+	case "snapshot":
+		runSnapshot(os.Args[2:])
+	case "advisory":
+		runAdvisory(os.Args[2:])
+	case "audit":
+		runAudit(os.Args[2:])
 	case "artifact":
 		runArtifact(os.Args[2:])
 	default:
@@ -47,7 +53,7 @@ func main() {
 
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "stateledger <command> [options]")
-	fmt.Fprintln(os.Stderr, "commands: init, collect, capture, manifest, append, query, verify, artifact")
+	fmt.Fprintln(os.Stderr, "commands: init, collect, capture, manifest, append, query, verify, snapshot, advisory, audit, artifact")
 }
 
 func defaultDBPath() string {
@@ -459,7 +465,99 @@ func runManifestShow(args []string) {
 
 	fmt.Println(out)
 }
+func runSnapshot(args []string) {
+	fs := flag.NewFlagSet("snapshot", flag.ExitOnError)
+	dbPath := fs.String("db", defaultDBPath(), "path to ledger database")
+	targetTime := fs.Int64("time", 0, "unix timestamp (seconds, 0=now)")
+	_ = fs.Parse(args)
 
+	if *targetTime == 0 {
+		*targetTime = time.Now().Unix()
+	}
+
+	l, err := ledger.Open(*dbPath)
+	if err != nil {
+		fatal(err)
+	}
+	defer l.Close()
+
+	rec := ledger.New(l)
+	report := rec.ReconstructAtTime(*targetTime)
+
+	out, _ := json.MarshalIndent(report, "", "  ")
+	fmt.Println(string(out))
+}
+
+func runAdvisory(args []string) {
+	fs := flag.NewFlagSet("advisory", flag.ExitOnError)
+	dbPath := fs.String("db", defaultDBPath(), "path to ledger database")
+	targetTime := fs.Int64("time", 0, "unix timestamp (seconds, 0=now)")
+	_ = fs.Parse(args)
+
+	if *targetTime == 0 {
+		*targetTime = time.Now().Unix()
+	}
+
+	l, err := ledger.Open(*dbPath)
+	if err != nil {
+		fatal(err)
+	}
+	defer l.Close()
+
+	rec := ledger.New(l)
+	report := rec.ReconstructAtTime(*targetTime)
+
+	// Analyze determinism
+	envAnalysis := ledger.AnalyzeEnvironment(report.State.Environment)
+	codeAnalysis := ledger.AnalyzeCode(report.State.Code)
+	configAnalysis := ledger.AnalyzeConfig(report.State.Config)
+	summary := ledger.SummarizeAnalyses(envAnalysis, codeAnalysis, configAnalysis)
+
+	// Print analysis
+	fmt.Println("=== Determinism Advisory ===")
+	fmt.Println(ledger.ReportJSON(summary))
+	fmt.Println("\n=== Explanation ===")
+	fmt.Println(rec.ExplainFailure(report))
+}
+
+func runAudit(args []string) {
+	fs := flag.NewFlagSet("audit", flag.ExitOnError)
+	dbPath := fs.String("db", defaultDBPath(), "path to ledger database")
+	targetTime := fs.Int64("time", 0, "unix timestamp (seconds, 0=now)")
+	output := fs.String("out", "", "write bundle to file")
+	_ = fs.Parse(args)
+
+	if *targetTime == 0 {
+		*targetTime = time.Now().Unix()
+	}
+
+	l, err := ledger.Open(*dbPath)
+	if err != nil {
+		fatal(err)
+	}
+	defer l.Close()
+
+	rec := ledger.New(l)
+	bundle, err := rec.ExportAuditBundle(*targetTime)
+	if err != nil {
+		fatal(err)
+	}
+
+	json, err := bundle.ToJSON()
+	if err != nil {
+		fatal(err)
+	}
+
+	if *output != "" {
+		if err := os.WriteFile(*output, []byte(json), 0o644); err != nil {
+			fatal(err)
+		}
+		fmt.Println("written: " + *output)
+		return
+	}
+
+	fmt.Println(json)
+}
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, err.Error())
 	os.Exit(1)

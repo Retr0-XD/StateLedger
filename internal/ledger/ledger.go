@@ -61,6 +61,16 @@ type VerifyResult struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+type ProofResult struct {
+	OK        bool   `json:"ok"`
+	FailedID  int64  `json:"failed_id,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Checked   int64  `json:"checked"`
+	LastID    int64  `json:"last_id,omitempty"`
+	LastHash  string `json:"last_hash,omitempty"`
+	Timestamp int64  `json:"timestamp"`
+}
+
 func Open(path string) (*Ledger, error) {
 	if path == "" {
 		return nil, errors.New("db path required")
@@ -225,6 +235,63 @@ func (l *Ledger) VerifyChain() (VerifyResult, error) {
 	return VerifyResult{
 		OK:        true,
 		Checked:   checked,
+		Timestamp: time.Now().Unix(),
+	}, nil
+}
+
+func (l *Ledger) VerifyUpTo(targetTime int64) (ProofResult, error) {
+	rows, err := l.db.Query(`SELECT id, ts, type, source, payload, hash, prev_hash FROM ledger_records WHERE ts <= ? ORDER BY id ASC`, targetTime)
+	if err != nil {
+		return ProofResult{}, err
+	}
+	defer rows.Close()
+
+	var prev string
+	var checked int64
+	var lastID int64
+	var lastHash string
+	for rows.Next() {
+		var rec Record
+		if err := rows.Scan(&rec.ID, &rec.Timestamp, &rec.Type, &rec.Source, &rec.Payload, &rec.Hash, &rec.PrevHash); err != nil {
+			return ProofResult{}, err
+		}
+
+		if rec.PrevHash != prev {
+			return ProofResult{
+				OK:        false,
+				FailedID:  rec.ID,
+				Reason:    "prev_hash mismatch",
+				Checked:   checked,
+				Timestamp: time.Now().Unix(),
+			}, nil
+		}
+
+		expected := computeHash(prev, rec.Timestamp, rec.Type, rec.Source, rec.Payload)
+		if rec.Hash != expected {
+			return ProofResult{
+				OK:        false,
+				FailedID:  rec.ID,
+				Reason:    "hash mismatch",
+				Checked:   checked,
+				Timestamp: time.Now().Unix(),
+			}, nil
+		}
+
+		prev = rec.Hash
+		lastID = rec.ID
+		lastHash = rec.Hash
+		checked++
+	}
+
+	if err := rows.Err(); err != nil {
+		return ProofResult{}, err
+	}
+
+	return ProofResult{
+		OK:        true,
+		Checked:   checked,
+		LastID:    lastID,
+		LastHash:  lastHash,
 		Timestamp: time.Now().Unix(),
 	}, nil
 }
