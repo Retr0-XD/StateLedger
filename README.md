@@ -504,6 +504,56 @@ Show manifest:
 
 ---
 
+## Testing
+
+### Unit Tests
+
+Run all unit tests across packages:
+
+```bash
+go test ./...
+```
+
+Test coverage by package:
+- **collectors** - Payload validation (code/config/environment/mutation schemas)
+- **manifest** - Manifest format parsing and validation
+- **sources** - Real collectors (Git/Environment/Config capture)
+- **artifacts** - Content-addressable artifact storage
+- **ledger** - Append-only ledger, hash chain verification, reconstruction engine
+- **cmd/stateledger** - CLI integration tests (full workflow)
+
+### Integration Tests
+
+The CLI package includes comprehensive integration tests that verify:
+- Database initialization
+- Manifest creation and execution
+- Collector capture and data ingestion
+- Hash chain verification
+- Snapshot reconstruction at time T
+- Determinism advisory analysis
+- Audit bundle export
+- Artifact storage and retrieval
+
+Run CLI integration tests specifically:
+
+```bash
+go test ./cmd/stateledger -v
+```
+
+### Smoke Test (Manual)
+
+Quick end-to-end verification:
+
+```bash
+go build -o /tmp/stateledger ./cmd/stateledger
+/tmp/stateledger init --db /tmp/sl/ledger.db --artifacts /tmp/sl/artifacts
+/tmp/stateledger manifest create --name "smoke" --output /tmp/sl/manifest.json
+/tmp/stateledger manifest run --file /tmp/sl/manifest.json --db /tmp/sl/ledger.db --source smoke
+/tmp/stateledger verify --db /tmp/sl/ledger.db
+/tmp/stateledger snapshot --db /tmp/sl/ledger.db --time 0
+/tmp/stateledger audit --db /tmp/sl/ledger.db --time 0 --out /tmp/sl/audit.json
+```
+
 ---
 
 ## License

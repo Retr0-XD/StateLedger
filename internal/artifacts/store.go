@@ -45,3 +45,17 @@ func Store(root, sourcePath string) (StoredArtifact, error) {
 		Size:     info.Size(),
 	}, nil
 }
+
+func Retrieve(root, checksum string) (string, error) {
+	path := filepath.Join(root, checksum)
+	if _, err := os.Stat(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func Exists(root, checksum string) bool {
+	path := filepath.Join(root, checksum)
+	_, err := os.Stat(path)
+	return err == nil
+}
