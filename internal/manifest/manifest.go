@@ -62,8 +62,9 @@ func (c Collector) Validate() error {
 	if !validKinds[c.Kind] {
 		return errors.New("invalid kind: " + c.Kind)
 	}
-	if strings.TrimSpace(c.Source) == "" {
-		return errors.New("source is required")
+	// environment source is optional (system-wide)
+	if c.Kind != "environment" && strings.TrimSpace(c.Source) == "" {
+		return errors.New("source is required for " + c.Kind)
 	}
 	return nil
 }
