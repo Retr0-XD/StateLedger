@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stateledger-manifest
+  namespace: default
+data:
+  manifest.json: |
+    {
+      "version": "1.0",
+      "name": "kubernetes-deployment",
+      "collectors": [
+        {
+          "kind": "environment"
+        },
+        {
+          "kind": "config",
+          "source": "/etc/app/config.yaml"
+        }
+      ]
+    }
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stateledger-capture
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - name: stateledger
+        image: stateledger:latest
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          # Initialize ledger
+          stateledger init --db /data/ledger.db --artifacts /data/artifacts
+          
+          # Run manifest
+          stateledger manifest run \
+            --manifest /config/manifest.json \
+            --db /data/ledger.db \
+            --source kubernetes-cluster
+          
+          # Verify
+          stateledger verify --db /data/ledger.db
+          
+          # Export audit
+          stateledger audit --db /data/ledger.db --out /data/audit.json
+          
+          # Copy to persistent storage
+          cp /data/ledger.db /output/
+          cp /data/audit.json /output/
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: app-config
+          mountPath: /etc/app
+        - name: data
+          mountPath: /data
+        - name: output
+          mountPath: /output
+      restartPolicy: Never
+      volumes:
+      - name: config
+        configMap:
+          name: stateledger-manifest
+      - name: app-config
+        configMap:
+          name: app-config
+      - name: data
+        emptyDir: {}
+      - name: output
+        persistentVolumeClaim:
+          claimName: stateledger-output
+  backoffLimit: 3
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: stateledger-output
+  namespace: default
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

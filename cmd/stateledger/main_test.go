@@ -14,7 +14,7 @@ func TestCLIWorkflow(t *testing.T) {
 	// Build the binary first
 	tmpDir := t.TempDir()
 	binaryPath := filepath.Join(tmpDir, "stateledger")
-	
+
 	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
 	if output, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build binary: %v\n%s", err, output)
@@ -35,12 +35,12 @@ func TestCLIWorkflow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("init command failed: %v\n%s", err, output)
 		}
-		
+
 		// Verify database was created
 		if _, err := os.Stat(dbPath); err != nil {
 			t.Errorf("Database file not created: %v", err)
 		}
-		
+
 		// Verify artifacts dir was created
 		if _, err := os.Stat(artifactsDir); err != nil {
 			t.Errorf("Artifacts dir not created: %v", err)
@@ -54,18 +54,18 @@ func TestCLIWorkflow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("manifest create failed: %v\n%s", err, output)
 		}
-		
+
 		// Verify manifest file was created
 		if _, err := os.Stat(manifestPath); err != nil {
 			t.Errorf("Manifest file not created: %v", err)
 		}
-		
+
 		// Verify it's valid JSON
 		data, err := os.ReadFile(manifestPath)
 		if err != nil {
 			t.Fatalf("Failed to read manifest: %v", err)
 		}
-		
+
 		var manifest map[string]any
 		if err := json.Unmarshal(data, &manifest); err != nil {
 			t.Errorf("Manifest is not valid JSON: %v", err)
@@ -79,22 +79,22 @@ func TestCLIWorkflow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("capture failed: %v\n%s", err, payload)
 		}
-		
+
 		// Extract payload JSON from capture result
 		var captureResult map[string]any
 		if err := json.Unmarshal(payload, &captureResult); err != nil {
 			t.Fatalf("Capture output should be JSON: %v", err)
 		}
-		
+
 		payloadJSON := captureResult["payload"].(string)
-		
+
 		// Collect it to DB
 		cmd := exec.Command(binaryPath, "collect", "-db", dbPath, "-kind", "environment", "-payload-json", payloadJSON)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("collect command failed: %v\n%s", err, output)
 		}
-		
+
 		// Output is JSON record
 		var result map[string]any
 		if err := json.Unmarshal(output, &result); err != nil {
@@ -108,29 +108,29 @@ func TestCLIWorkflow(t *testing.T) {
 		if err := os.WriteFile(configPath, []byte("key: value\nport: 8080"), 0644); err != nil {
 			t.Fatalf("Failed to create test config: %v", err)
 		}
-		
+
 		// Capture config first
 		capture := exec.Command(binaryPath, "capture", "-kind", "config", "-path", configPath)
 		payload, err := capture.CombinedOutput()
 		if err != nil {
 			t.Fatalf("capture failed: %v\n%s", err, payload)
 		}
-		
+
 		// Extract payload JSON
 		var captureResult map[string]any
 		if err := json.Unmarshal(payload, &captureResult); err != nil {
 			t.Fatalf("Capture output should be JSON: %v", err)
 		}
-		
+
 		payloadJSON := captureResult["payload"].(string)
-		
+
 		// Collect it to DB
 		cmd := exec.Command(binaryPath, "collect", "-db", dbPath, "-kind", "config", "-source", configPath, "-payload-json", payloadJSON)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("collect config failed: %v\n%s", err, output)
 		}
-		
+
 		// Output is JSON record
 		var result map[string]any
 		if err := json.Unmarshal(output, &result); err != nil {
@@ -144,13 +144,13 @@ func TestCLIWorkflow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("query command failed: %v\n%s", err, output)
 		}
-		
+
 		// Output is newline-separated JSON objects (not a JSON array)
 		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 		if len(lines) < 2 {
 			t.Errorf("Expected at least 2 records, got %d lines", len(lines))
 		}
-		
+
 		// Verify each line is valid JSON
 		for i, line := range lines {
 			if line == "" {
@@ -169,13 +169,13 @@ func TestCLIWorkflow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("verify command failed: %v\n%s", err, output)
 		}
-		
+
 		// Output is JSON
 		var result map[string]any
 		if err := json.Unmarshal(output, &result); err != nil {
 			t.Errorf("Output should be valid JSON: %v", err)
 		}
-		
+
 		// Should have "ok": true
 		if ok, exists := result["ok"].(bool); !exists || !ok {
 			t.Errorf("Expected ok: true in verification result, got: %s", output)
@@ -188,13 +188,13 @@ func TestCLIWorkflow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("snapshot command failed: %v\n%s", err, output)
 		}
-		
+
 		// Output is JSON
 		var result map[string]any
 		if err := json.Unmarshal(output, &result); err != nil {
 			t.Errorf("Output should be valid JSON: %v", err)
 		}
-		
+
 		// Should have determinism_score field
 		if _, exists := result["determinism_score"]; !exists {
 			t.Errorf("Expected determinism_score field, got: %s", output)
@@ -207,7 +207,7 @@ func TestCLIWorkflow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("advisory command failed: %v\n%s", err, output)
 		}
-		
+
 		// Advisory outputs formatted text with sections
 		outStr := string(output)
 		if !strings.Contains(outStr, "Advisory") && !strings.Contains(outStr, "Explanation") {
@@ -222,23 +222,23 @@ func TestCLIWorkflow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("audit command failed: %v\n%s", err, output)
 		}
-		
+
 		// Verify audit bundle was created
 		if _, err := os.Stat(auditPath); err != nil {
 			t.Errorf("Audit bundle not created: %v", err)
 		}
-		
+
 		// Verify it's valid JSON
 		data, err := os.ReadFile(auditPath)
 		if err != nil {
 			t.Fatalf("Failed to read audit bundle: %v", err)
 		}
-		
+
 		var bundle map[string]any
 		if err := json.Unmarshal(data, &bundle); err != nil {
 			t.Errorf("Audit bundle is not valid JSON: %v", err)
 		}
-		
+
 		// Verify bundle has expected fields
 		if _, ok := bundle["snapshot"]; !ok {
 			t.Error("Audit bundle missing 'snapshot' field")
@@ -255,19 +255,19 @@ func TestCLIWorkflow(t *testing.T) {
 		if err := os.WriteFile(artifactFile, content, 0644); err != nil {
 			t.Fatalf("Failed to create test artifact: %v", err)
 		}
-		
+
 		cmd := exec.Command(binaryPath, "artifact", "put", "-artifacts", artifactsDir, "-file", artifactFile)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("artifact put failed: %v\n%s", err, output)
 		}
-		
+
 		// Output is JSON
 		var result map[string]any
 		if err := json.Unmarshal(output, &result); err != nil {
 			t.Errorf("Output should be valid JSON: %v\nGot: %s", err, output)
 		}
-		
+
 		// Should have checksum field
 		if _, exists := result["checksum"]; !exists {
 			t.Errorf("Expected checksum field, got: %s", output)
@@ -279,7 +279,7 @@ func TestCLIWorkflow(t *testing.T) {
 func TestCLIErrorHandling(t *testing.T) {
 	tmpDir := t.TempDir()
 	binaryPath := filepath.Join(tmpDir, "stateledger")
-	
+
 	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
 	if output, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build binary: %v\n%s", err, output)

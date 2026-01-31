@@ -1,0 +1,48 @@
+# Binaries
+stateledger
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+*.out
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Build artifacts
+/bin/
+/dist/
+/build/
+
+# Data files
+*.db
+*.sqlite
+*.sqlite3
+data/
+artifacts/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Coverage files
+*.coverprofile
+coverage.txt
+coverage.html
+
+# Temporary files
+/tmp/
+*.tmp
+*.log
+
+# CI/CD artifacts
+/.github/workflows/test-results/

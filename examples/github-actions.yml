@@ -1,0 +1,95 @@
+name: StateLedger Capture
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  capture-build-state:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for git info
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: Download StateLedger
+      run: |
+        curl -L https://github.com/Retr0-XD/StateLedger/releases/latest/download/stateledger-linux-amd64 -o stateledger
+        chmod +x stateledger
+
+    - name: Initialize Ledger
+      run: |
+        ./stateledger init --db build-ledger.db --artifacts ./artifacts
+
+    - name: Capture Environment
+      run: |
+        ./stateledger capture -kind environment -path /tmp > env.json
+        ./stateledger collect --db build-ledger.db --kind environment \
+          --payload-json "$(jq -c '.payload' env.json)"
+
+    - name: Capture Code State
+      run: |
+        ./stateledger capture -kind code -path . > code.json
+        ./stateledger collect --db build-ledger.db --kind code \
+          --source ${{ github.repository }} \
+          --payload-json "$(jq -c '.payload' code.json)"
+
+    - name: Capture Configuration
+      run: |
+        if [ -f config.yaml ]; then
+          ./stateledger capture -kind config -path config.yaml > config.json
+          ./stateledger collect --db build-ledger.db --kind config \
+            --source config.yaml \
+            --payload-json "$(jq -c '.payload' config.json)"
+        fi
+
+    - name: Verify Integrity
+      run: |
+        ./stateledger verify --db build-ledger.db
+
+    - name: Generate Snapshot
+      run: |
+        ./stateledger snapshot --db build-ledger.db > snapshot.json
+        cat snapshot.json | jq
+
+    - name: Export Audit Bundle
+      run: |
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        ./stateledger audit --db build-ledger.db --out audit-${TIMESTAMP}.json
+
+    - name: Store Build Artifacts
+      if: success()
+      run: |
+        # Store compiled binaries if they exist
+        if [ -d dist/ ]; then
+          for file in dist/*; do
+            ./stateledger artifact put --artifacts ./artifacts --file "$file"
+          done
+        fi
+
+    - name: Upload Ledger
+      uses: actions/upload-artifact@v4
+      with:
+        name: state-ledger-${{ github.sha }}
+        path: |
+          build-ledger.db
+          audit-*.json
+          snapshot.json
+
+    - name: Check Determinism
+      run: |
+        SCORE=$(jq -r '.determinism_score' snapshot.json)
+        echo "Determinism Score: $SCORE"
+        if [ "$SCORE" -lt 75 ]; then
+          echo "::warning::Low determinism score ($SCORE). Check advisory for recommendations."
+          ./stateledger advisory --db build-ledger.db
+        fi

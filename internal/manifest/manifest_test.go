@@ -151,11 +151,11 @@ func TestNewManifest(t *testing.T) {
 func TestAddCollector(t *testing.T) {
 	m := NewManifest("test")
 	m.AddCollector("code", "/repo", map[string]string{"branch": "main"})
-	
+
 	if len(m.Collectors) != 1 {
 		t.Fatalf("Expected 1 collector, got %d", len(m.Collectors))
 	}
-	
+
 	col := m.Collectors[0]
 	if col.Kind != "code" {
 		t.Errorf("Kind = %v, want code", col.Kind)
@@ -171,18 +171,18 @@ func TestAddCollector(t *testing.T) {
 func TestManifestToJSON(t *testing.T) {
 	m := NewManifest("test")
 	m.AddCollector("code", "/repo", nil)
-	
+
 	jsonStr, err := m.ToJSON()
 	if err != nil {
 		t.Fatalf("ToJSON() error = %v", err)
 	}
-	
+
 	// Verify it's valid JSON and can be unmarshaled
 	var decoded Manifest
 	if err := json.Unmarshal([]byte(jsonStr), &decoded); err != nil {
 		t.Fatalf("Failed to unmarshal JSON: %v", err)
 	}
-	
+
 	if decoded.Name != "test" {
 		t.Errorf("Decoded name = %v, want test", decoded.Name)
 	}
@@ -196,7 +196,7 @@ func TestLoadManifest(t *testing.T) {
 		// Create temp file
 		tmpDir := t.TempDir()
 		manifestPath := filepath.Join(tmpDir, "manifest.json")
-		
+
 		content := `{
   "version": "1.0",
   "name": "test-manifest",
@@ -213,12 +213,12 @@ func TestLoadManifest(t *testing.T) {
 		if err := os.WriteFile(manifestPath, []byte(content), 0644); err != nil {
 			t.Fatalf("Failed to create test file: %v", err)
 		}
-		
+
 		m, err := LoadManifest(manifestPath)
 		if err != nil {
 			t.Fatalf("LoadManifest() error = %v", err)
 		}
-		
+
 		if m.Name != "test-manifest" {
 			t.Errorf("Name = %v, want test-manifest", m.Name)
 		}
@@ -226,25 +226,25 @@ func TestLoadManifest(t *testing.T) {
 			t.Errorf("Collectors length = %v, want 2", len(m.Collectors))
 		}
 	})
-	
+
 	t.Run("invalid json", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		manifestPath := filepath.Join(tmpDir, "invalid.json")
-		
+
 		if err := os.WriteFile(manifestPath, []byte("{invalid json"), 0644); err != nil {
 			t.Fatalf("Failed to create test file: %v", err)
 		}
-		
+
 		_, err := LoadManifest(manifestPath)
 		if err == nil {
 			t.Error("LoadManifest() should have failed on invalid JSON")
 		}
 	})
-	
+
 	t.Run("invalid manifest", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		manifestPath := filepath.Join(tmpDir, "invalid-manifest.json")
-		
+
 		content := `{
   "version": "1.0",
   "name": "",
@@ -253,7 +253,7 @@ func TestLoadManifest(t *testing.T) {
 		if err := os.WriteFile(manifestPath, []byte(content), 0644); err != nil {
 			t.Fatalf("Failed to create test file: %v", err)
 		}
-		
+
 		_, err := LoadManifest(manifestPath)
 		if err == nil {
 			t.Error("LoadManifest() should have failed on invalid manifest")
@@ -262,7 +262,7 @@ func TestLoadManifest(t *testing.T) {
 			t.Errorf("Expected validation error, got: %v", err)
 		}
 	})
-	
+
 	t.Run("nonexistent file", func(t *testing.T) {
 		_, err := LoadManifest("/nonexistent/path")
 		if err == nil {
