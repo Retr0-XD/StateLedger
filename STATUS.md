@@ -233,3 +233,4 @@ Run smoke test:
 
 **Ready for production MVP use** ✅  
 All core features implemented, tested, and documented.
+# Workflow trigger - secrets configured
