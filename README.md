@@ -804,7 +804,7 @@ A: Use the built-in stress testing tool: `go run ./cmd/stress-test -events=50000
 
 ## License
 
-MIT License - see LICENSE file for details.
+Apache 2.0 - see LICENSE file for details.
 
 ---
 
@@ -812,7 +812,7 @@ MIT License - see LICENSE file for details.
 
 - **Issues**: [GitHub Issues](https://github.com/Retr0-XD/StateLedger/issues)
 - **Pull Requests**: [GitHub Pull Requests](https://github.com/Retr0-XD/StateLedger/pulls)
-- **Documentation**: [docs/](./docs/)
+- **Contribution Guide**: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ---
 
@@ -824,4 +824,4 @@ MIT License - see LICENSE file for details.
 ✓ **Enterprise Features** - Compression, caching, rate limiting, webhooks  
 
 **Latest Version:** 1.0.0  
-**Last Updated:** February 2025
+**Last Updated:** February 2026
