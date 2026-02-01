@@ -65,18 +65,97 @@ Export audit bundle:
 | `advisory` | Determinism analysis | 
 | `audit` | Export audit bundle |
 | `artifact put` | Store artifact by checksum |
+| `server` | Run REST API server (NEW) |
+
+---
+
+## REST API Server (NEW)
+
+StateLedger now includes a production-ready REST API for programmatic access:
+
+```bash
+./stateledger server --db data/ledger.db --addr :8080
+```
+
+### Available Endpoints
+
+- `GET /health` - Health check
+- `GET /api/v1/records` - List records (with pagination)
+- `GET /api/v1/records/{id}` - Get specific record
+- `GET /api/v1/verify` - Verify chain integrity
+- `GET /api/v1/snapshot?time=<RFC3339>` - Reconstruct state at time T
+
+Example:
+
+```bash
+curl http://localhost:8080/health
+curl "http://localhost:8080/api/v1/records?limit=10&offset=0"
+curl http://localhost:8080/api/v1/verify
+```
 
 ---
 
 ## Docker & Kubernetes usage
 
-Yes — this project works well as a **batch job** in Kubernetes. It is designed to run as a **CLI or Job/CronJob**, not as a long-running server. Typical integration:
+StateLedger supports both **batch jobs** and **long-running API servers** in Kubernetes:
 
-1. Use a **PVC** for the ledger DB and artifacts directory.
-2. Run a **Job/CronJob** to capture state and export audits.
-3. Store `ledger.db` and audit bundles in durable storage.
+### Batch Mode (CLI/Job/CronJob)
+1. Use a **PVC** for the ledger DB and artifacts directory
+2. Run a **Job/CronJob** to capture state and export audits
+3. Store `ledger.db` and audit bundles in durable storage
 
 Example Kubernetes job: [examples/kubernetes-job.yaml](examples/kubernetes-job.yaml)
+
+### Server Mode (Deployment)
+1. Deploy as a **Deployment** with REST API exposed
+2. Use **Service** for load balancing across replicas
+3. Optional **Ingress** for external access
+
+Example Helm chart: [deployments/helm/](deployments/helm/)  
+Example Kustomize: [deployments/kustomize/](deployments/kustomize/)
+
+---
+
+## Deployment Options
+
+### Helm Chart (Recommended for Production)
+
+```bash
+helm install stateledger ./deployments/helm/stateledger \
+  --set persistence.enabled=true \
+  --set persistence.size=50Gi \
+  --set autoscaling.enabled=true
+```
+
+Features:
+- HPA (Horizontal Pod Autoscaling)
+- Ingress support
+- Health probes
+- Resource limits
+- Security best practices
+
+See [deployments/helm/README.md](deployments/helm/README.md) for full configuration.
+
+### Kustomize Overlays
+
+```bash
+# Development
+kubectl apply -k deployments/kustomize/overlays/dev
+
+# Staging
+kubectl apply -k deployments/kustomize/overlays/staging
+
+# Production
+kubectl apply -k deployments/kustomize/overlays/prod
+```
+
+Each overlay includes environment-specific:
+- Replica counts
+- Resource limits
+- Storage sizes
+- Log levels
+
+See [deployments/kustomize/README.md](deployments/kustomize/README.md) for details.
 
 ---
 
@@ -90,7 +169,6 @@ Set these in your repo settings:
 
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
-- `DOCKERHUB_REPO` (e.g. `yourname/stateledger`)
 
 ### Build and Push (CI)
 
@@ -133,10 +211,27 @@ Use:
 
 ## Documentation
 
-- Quickstart: [QUICKSTART.md](QUICKSTART.md)
-- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Status: [STATUS.md](STATUS.md)
-- Examples: [examples/README.md](examples/README.md)
+- **Quickstart**: [QUICKSTART.md](QUICKSTART.md)
+- **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Benchmarks**: [BENCHMARKS.md](BENCHMARKS.md) - Performance analysis
+- **Status**: [STATUS.md](STATUS.md)
+- **Helm Chart**: [deployments/helm/README.md](deployments/helm/README.md)
+- **Kustomize**: [deployments/kustomize/README.md](deployments/kustomize/README.md)
+- **Examples**: [examples/README.md](examples/README.md)
+
+---
+
+## Performance
+
+StateLedger is optimized for high throughput and low latency:
+
+- **Append**: ~12,000 ops/sec (84µs latency)
+- **Read by ID**: ~26,000 ops/sec (39µs latency)
+- **List 100 records**: ~3,500 ops/sec (287µs)
+- **Chain verification** (1,000 records): ~2.4ms
+- **API health check**: ~445,000 ops/sec (2.2µs)
+
+See [BENCHMARKS.md](BENCHMARKS.md) for detailed performance analysis and optimization recommendations.
 
 ---
 
