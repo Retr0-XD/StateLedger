@@ -114,11 +114,19 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if val, err := strconv.Atoi(l); err == nil && val > 0 && val <= 1000 {
 			limit = val
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse("invalid offset"))
+			return
 		}
 	}
 	if o := r.URL.Query().Get("offset"); o != "" {
 		if val, err := strconv.Atoi(o); err == nil && val >= 0 {
 			offset = val
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse("invalid offset"))
+			return
 		}
 	}
 
@@ -225,8 +233,8 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 
 // SnapshotRequest represents a snapshot query
 type SnapshotRequest struct {
-	Time      string `json:"time,omitempty"`       // RFC3339 timestamp (default: now)
-	Namespace string `json:"namespace,omitempty"`  // Filter by namespace
+	Time      string `json:"time,omitempty"`      // RFC3339 timestamp (default: now)
+	Namespace string `json:"namespace,omitempty"` // Filter by namespace
 }
 
 // handleSnapshot reconstructs state at a point in time
@@ -240,8 +248,36 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetTime := time.Now()
-	if ts := r.URL.Query().Get("time"); ts != "" {
-		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+
+	if r.Method == http.MethodPost { // handling POST
+		var req SnapshotRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse("Invalid JSON payload"))
+			return
+		}
+
+		// validate time field if provided
+		if req.Time != "" {
+			t, err := time.Parse(time.RFC3339, req.Time)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(ErrorResponse("Invalid time format in payload: must be RFC3339"))
+				return
+			}
+			targetTime = t
+		}
+	} else { // handling GET
+		ts := r.URL.Query().Get("time")
+		fmt.Printf("DEBUG: time param = '%s'\n", ts)
+		if ts != "" {
+			t, err := time.Parse(time.RFC3339, ts)
+			if err != nil {
+				fmt.Printf("DEBUG: parse error = %v\n", err)
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(ErrorResponse("Invalid time format: must be RFC3339"))
+				return
+			}
 			targetTime = t
 		}
 	}
