@@ -1,0 +1,26 @@
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+COPY internal ./internal
+COPY cmd/microservice-app ./cmd
+
+RUN go build -o microservice-app ./cmd
+
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /app
+
+COPY --from=builder /build/microservice-app .
+
+EXPOSE 8080
+
+ENV DB_PATH=/data/microservice.db
+ENV PORT=8080
+
+VOLUME /data
+
+CMD ["./microservice-app"]
