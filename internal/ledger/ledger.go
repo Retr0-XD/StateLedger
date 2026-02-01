@@ -81,6 +81,12 @@ func Open(path string) (*Ledger, error) {
 		return nil, err
 	}
 
+	// Configure connection pool for scalability
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(1 * time.Minute)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
@@ -140,6 +146,70 @@ func (l *Ledger) Append(input RecordInput) (Record, error) {
 		Hash:      hash,
 		PrevHash:  prevHash,
 	}, nil
+}
+
+// AppendBatch appends multiple records in a single transaction for better performance
+func (l *Ledger) AppendBatch(inputs []RecordInput) ([]Record, error) {
+	if len(inputs) == 0 {
+		return nil, errors.New("no inputs provided")
+	}
+
+	tx, err := l.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	prevHash, err := l.lastHashTx(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	records := make([]Record, 0, len(inputs))
+	stmt, err := tx.Prepare(`INSERT INTO ledger_records(ts, type, source, payload, hash, prev_hash) VALUES(?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	for _, input := range inputs {
+		if strings.TrimSpace(input.Type) == "" {
+			return nil, errors.New("type required")
+		}
+		if strings.TrimSpace(input.Payload) == "" {
+			return nil, errors.New("payload required")
+		}
+
+		hash := computeHash(prevHash, input.Timestamp, input.Type, input.Source, input.Payload)
+
+		res, err := stmt.Exec(input.Timestamp, input.Type, input.Source, input.Payload, hash, prevHash)
+		if err != nil {
+			return nil, err
+		}
+
+		id, err := res.LastInsertId()
+		if err != nil {
+			return nil, err
+		}
+
+		records = append(records, Record{
+			ID:        id,
+			Timestamp: input.Timestamp,
+			Type:      input.Type,
+			Source:    input.Source,
+			Payload:   input.Payload,
+			Hash:      hash,
+			PrevHash:  prevHash,
+		})
+
+		prevHash = hash
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return records, nil
 }
 
 func (l *Ledger) GetByID(id int64) (Record, error) {
@@ -298,6 +368,18 @@ func (l *Ledger) VerifyUpTo(targetTime int64) (ProofResult, error) {
 
 func (l *Ledger) lastHash() (string, error) {
 	row := l.db.QueryRow(`SELECT hash FROM ledger_records ORDER BY id DESC LIMIT 1`)
+	var hash string
+	if err := row.Scan(&hash); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return hash, nil
+}
+
+func (l *Ledger) lastHashTx(tx *sql.Tx) (string, error) {
+	row := tx.QueryRow(`SELECT hash FROM ledger_records ORDER BY id DESC LIMIT 1`)
 	var hash string
 	if err := row.Scan(&hash); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
