@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: stateledger
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - pvc.yaml
+  - serviceaccount.yaml
+
+commonLabels:
+  app: stateledger
+  managed-by: kustomize
+
+commonAnnotations:
+  description: "StateLedger - Append-only ledger for deterministic state reconstruction"

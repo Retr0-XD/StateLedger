@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Retr0-XD/StateLedger/internal/api"
 	"github.com/Retr0-XD/StateLedger/internal/artifacts"
 	"github.com/Retr0-XD/StateLedger/internal/collectors"
 	"github.com/Retr0-XD/StateLedger/internal/ledger"
@@ -45,6 +46,8 @@ func main() {
 		runAudit(os.Args[2:])
 	case "artifact":
 		runArtifact(os.Args[2:])
+	case "server":
+		runServer(os.Args[2:])
 	default:
 		printUsage()
 		os.Exit(2)
@@ -53,7 +56,7 @@ func main() {
 
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "stateledger <command> [options]")
-	fmt.Fprintln(os.Stderr, "commands: init, collect, capture, manifest, append, query, verify, snapshot, advisory, audit, artifact")
+	fmt.Fprintln(os.Stderr, "commands: init, collect, capture, manifest, append, query, verify, snapshot, advisory, audit, artifact, server")
 }
 
 func defaultDBPath() string {
@@ -558,6 +561,25 @@ func runAudit(args []string) {
 
 	fmt.Println(json)
 }
+
+func runServer(args []string) {
+	fs := flag.NewFlagSet("server", flag.ExitOnError)
+	dbPath := fs.String("db", defaultDBPath(), "path to ledger database")
+	addr := fs.String("addr", ":8080", "server address (host:port)")
+	_ = fs.Parse(args)
+
+	l, err := ledger.Open(*dbPath)
+	if err != nil {
+		fatal(err)
+	}
+	defer l.Close()
+
+	server := api.NewServer(l, *addr)
+	if err := server.Start(); err != nil {
+		fatal(err)
+	}
+}
+
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, err.Error())
 	os.Exit(1)
