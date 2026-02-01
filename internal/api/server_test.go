@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -85,6 +86,63 @@ func TestHandleListRecordsWithPagination(t *testing.T) {
 	}
 }
 
+func TestHandleListRecords_LimitParams(t *testing.T) {
+	s := setupTestServer(t)
+
+	// negative limit
+	req := httptest.NewRequest("GET", "/api/v1/records?limit=-1", nil)
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for negative limit, got %d", w.Code)
+	}
+
+	// illegal limit value
+	req = httptest.NewRequest("GET", "/api/v1/records?limit=abd", nil)
+	w = httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for illegal limit value, got %d", w.Code)
+	}
+
+	// max limit exceed
+	req = httptest.NewRequest("GET", "/api/v1/records?limit=2000", nil)
+	w = httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for exceeding max limit, got %d", w.Code)
+	}
+}
+
+func TestHandleListRecords_OffsetParams(t *testing.T) {
+	s := setupTestServer(t)
+
+	// invalid offset field
+	req := httptest.NewRequest("GET", "/api/v1/records?offset=abc", nil)
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for invalid offset value, got %d", w.Code)
+	}
+
+	// negatie offset field
+	req = httptest.NewRequest("GET", "/api/v1/records?offset=-1", nil)
+	w = httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for negative offset, got %d", w.Code)
+	}
+}
 func TestHandleGetRecord(t *testing.T) {
 	s := setupTestServer(t)
 	req := httptest.NewRequest("GET", "/api/v1/records/1", nil)
@@ -135,7 +193,8 @@ func TestHandleSnapshot(t *testing.T) {
 	s := setupTestServer(t)
 
 	// Test with GET
-	req := httptest.NewRequest("GET", "/api/v1/snapshot?time="+time.Now().Format(time.RFC3339), nil)
+	validTime := url.QueryEscape(time.Now().Format(time.RFC3339))
+	req := httptest.NewRequest("GET", "/api/v1/snapshot?time="+validTime, nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
@@ -154,6 +213,60 @@ func TestHandleSnapshot(t *testing.T) {
 	}
 }
 
+func TestHandleSnapShot_Timestamp(t *testing.T) {
+	s := setupTestServer(t)
+
+	// illegal timestamp
+	req := httptest.NewRequest("GET", "/api/v1/snapshot?time=abbc", nil)
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for illegal timestamp, got %d", w.Code)
+	}
+
+	// non-RFC3339 format
+	req = httptest.NewRequest("GET", "/api/v1/snapshot?time=01/01/2001", nil)
+	w = httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for non-RFC3339 format, got %d", w.Code)
+	}
+}
+func TestHandleSnapShot_Payload(t *testing.T) {
+	s := setupTestServer(t)
+
+	// malformed json
+	req := httptest.NewRequest("POST", "/api/v1/snapshot", bytes.NewReader([]byte("{invalid json")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for malformed json, got %d", w.Code)
+	}
+
+	// empty body
+	req = httptest.NewRequest("POST", "/api/v1/snapshot", bytes.NewReader([]byte("")))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for empty body, got %d", w.Code)
+	}
+
+	// invalid field types in json
+	req = httptest.NewRequest("POST", "/api/v1/snapshot", bytes.NewReader([]byte(`{"time": 12345}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for invalid field type, got %d", w.Code)
+	}
+}
 func TestHandleSnapshotPOST(t *testing.T) {
 	s := setupTestServer(t)
 
