@@ -91,7 +91,7 @@ func main() {
 
 	// Allow database to settle
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Close and reopen to ensure all writes are flushed
 	sl.Close()
 	sl, err = ledger.Open(dbPath)

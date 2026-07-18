@@ -18,11 +18,11 @@ type WebhookEvent struct {
 
 // WebhookManager manages webhook subscriptions and delivery
 type WebhookManager struct {
-	mu           sync.RWMutex
+	mu            sync.RWMutex
 	subscriptions map[string]*Subscription
-	httpClient   *http.Client
-	maxRetries   int
-	retryDelay   time.Duration
+	httpClient    *http.Client
+	maxRetries    int
+	retryDelay    time.Duration
 }
 
 // Subscription represents a webhook subscription

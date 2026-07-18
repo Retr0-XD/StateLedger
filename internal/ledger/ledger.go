@@ -28,10 +28,10 @@ CREATE INDEX IF NOT EXISTS idx_ledger_records_ts ON ledger_records(ts);
 `
 
 type Ledger struct {
-	db *sql.DB
-	wal *WAL
+	db     *sql.DB
+	wal    *WAL
 	walSeq int64
-	walMu sync.Mutex
+	walMu  sync.Mutex
 }
 
 // OpenOptions configures how a Ledger is opened.

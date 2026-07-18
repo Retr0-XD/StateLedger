@@ -23,11 +23,11 @@ type CompactOptions struct {
 
 // CompactResult reports what Compact did.
 type CompactResult struct {
-	Removed     int64  `json:"removed"`
-	Remaining   int64  `json:"remaining"`
-	Rebuilt     bool   `json:"rebuilt"`
-	NewRoot     string `json:"new_root"`
-	Timestamp   int64  `json:"timestamp"`
+	Removed   int64  `json:"removed"`
+	Remaining int64  `json:"remaining"`
+	Rebuilt   bool   `json:"rebuilt"`
+	NewRoot   string `json:"new_root"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // Compact prunes old records and (optionally) rebuilds the hash chain so the
@@ -149,7 +149,7 @@ func (l *Ledger) rebuildChain() error {
 	}
 
 	type rec struct {
-		id, ts      int64
+		id, ts              int64
 		rtype, src, payload string
 	}
 	var recs []rec

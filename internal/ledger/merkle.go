@@ -59,11 +59,11 @@ func (t *MerkleTree) Root() string {
 
 // MerkleProof is an inclusion proof for a single leaf.
 type MerkleProof struct {
-	Leaf       string   `json:"leaf"`
-	Index      int      `json:"index"`
-	Root       string   `json:"root"`
-	Siblings   []string `json:"siblings"`   // sibling hashes bottom-up
-	IsRight    []bool   `json:"is_right"`   // true if sibling is on the right
+	Leaf     string   `json:"leaf"`
+	Index    int      `json:"index"`
+	Root     string   `json:"root"`
+	Siblings []string `json:"siblings"` // sibling hashes bottom-up
+	IsRight  []bool   `json:"is_right"` // true if sibling is on the right
 }
 
 // GenerateProof returns an inclusion proof for the leaf at the given index.
@@ -129,7 +129,7 @@ func VerifyProof(proof MerkleProof) bool {
 // entire chain.
 type SignedRoot struct {
 	Root      string `json:"root"`
-	Index     int64  `json:"index"`     // last record id covered by the root
+	Index     int64  `json:"index"` // last record id covered by the root
 	Timestamp int64  `json:"timestamp"`
 	Signature string `json:"signature"` // hex-encoded ed25519 signature
 	PublicKey string `json:"public_key"`

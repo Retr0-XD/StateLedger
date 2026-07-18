@@ -622,9 +622,9 @@ func runProve(args []string) {
 	}
 
 	out := map[string]interface{}{
-		"proof":      proof,
+		"proof":       proof,
 		"signed_root": signed,
-		"verified":   ledger.VerifyProof(proof) && signed.Verify(),
+		"verified":    ledger.VerifyProof(proof) && signed.Verify(),
 	}
 	enc, _ := json.MarshalIndent(out, "", "  ")
 	fmt.Println(string(enc))

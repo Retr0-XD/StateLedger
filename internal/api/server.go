@@ -289,8 +289,8 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 
 // SnapshotRequest represents a snapshot query
 type SnapshotRequest struct {
-	Time      string `json:"time,omitempty"`       // RFC3339 timestamp (default: now)
-	Namespace string `json:"namespace,omitempty"`  // Filter by namespace
+	Time      string `json:"time,omitempty"`      // RFC3339 timestamp (default: now)
+	Namespace string `json:"namespace,omitempty"` // Filter by namespace
 }
 
 // handleSnapshot reconstructs state at a point in time

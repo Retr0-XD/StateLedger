@@ -25,9 +25,9 @@ type WAL struct {
 
 // WALEntry is a single serialized append operation.
 type WALEntry struct {
-	Seq     int64         `json:"seq"`
-	Input   RecordInput   `json:"input"`
-	Committed bool         `json:"committed"`
+	Seq       int64       `json:"seq"`
+	Input     RecordInput `json:"input"`
+	Committed bool        `json:"committed"`
 }
 
 // NewWAL opens (or creates) a WAL file at the given path. When fsync is true
