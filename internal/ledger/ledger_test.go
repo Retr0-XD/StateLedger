@@ -141,3 +141,148 @@ func TestArtifactStore(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 }
+
+func TestCompactKeepLastN(t *testing.T) {
+	l := newTestLedger(t)
+	defer l.Close()
+
+	for i := int64(0); i < 10; i++ {
+		if _, err := l.Append(RecordInput{Timestamp: 1000 + i, Type: "code", Source: "test", Payload: `{"n":1}`}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	res, err := l.Compact(CompactOptions{KeepLastN: 3})
+	if err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if res.Remaining != 3 {
+		t.Fatalf("expected 3 remaining, got %d", res.Remaining)
+	}
+	if res.Removed != 7 {
+		t.Fatalf("expected 7 removed, got %d", res.Removed)
+	}
+
+	// Chain must still verify after pruning.
+	vr, err := l.VerifyChain()
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if !vr.OK {
+		t.Fatalf("chain broken after compact: %+v", vr)
+	}
+}
+
+func TestCompactRebuildChain(t *testing.T) {
+	l := newTestLedger(t)
+	defer l.Close()
+
+	for i := int64(0); i < 5; i++ {
+		if _, err := l.Append(RecordInput{Timestamp: 1000 + i, Type: "code", Source: "test", Payload: `{"n":1}`}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	// Tamper with a stored hash to simulate corruption.
+	if _, err := l.db.Exec(`UPDATE ledger_records SET hash = 'deadbeef' WHERE id = 2`); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+	if vr, _ := l.VerifyChain(); vr.OK {
+		t.Fatalf("expected chain to be broken before rebuild")
+	}
+
+	res, err := l.Compact(CompactOptions{RebuildChain: true})
+	if err != nil {
+		t.Fatalf("compact rebuild: %v", err)
+	}
+	if !res.Rebuilt {
+		t.Fatalf("expected rebuilt=true")
+	}
+
+	vr, err := l.VerifyChain()
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if !vr.OK {
+		t.Fatalf("chain should be consistent after rebuild: %+v", vr)
+	}
+}
+
+func TestWALRecovery(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "ledger.db")
+	walPath := filepath.Join(dir, "ledger.wal")
+
+	l, err := OpenWithOptions(dbPath, OpenOptions{WALPath: walPath, WALFsync: true})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := l.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	// Append a record; it should be committed and the WAL truncated on recovery.
+	if _, err := l.Append(RecordInput{Timestamp: 1000, Type: "code", Source: "test", Payload: `{"n":1}`}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Reopen: WAL should be empty (committed), so no duplicate records.
+	l2, err := OpenWithOptions(dbPath, OpenOptions{WALPath: walPath, WALFsync: true})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer l2.Close()
+
+	recs, err := l2.List(ListQuery{Limit: 1000})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 record after recovery, got %d", len(recs))
+	}
+}
+
+func TestWALRecoveryReplaysPending(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "ledger.db")
+	walPath := filepath.Join(dir, "ledger.wal")
+
+	l, err := OpenWithOptions(dbPath, OpenOptions{WALPath: walPath, WALFsync: true})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := l.InitSchema(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	// Manually write a WAL entry that is NOT marked committed, simulating a
+	// crash between WAL write and DB commit.
+	w := l.wal
+	if err := w.Log(1, RecordInput{Timestamp: 2000, Type: "code", Source: "test", Payload: `{"pending":true}`}); err != nil {
+		t.Fatalf("wal log: %v", err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Reopen: the pending entry must be replayed into the ledger.
+	l2, err := OpenWithOptions(dbPath, OpenOptions{WALPath: walPath, WALFsync: true})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer l2.Close()
+
+	recs, err := l2.List(ListQuery{Limit: 1000})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 replayed record, got %d", len(recs))
+	}
+	if recs[0].Payload != `{"pending":true}` {
+		t.Fatalf("unexpected payload: %s", recs[0].Payload)
+	}
+}

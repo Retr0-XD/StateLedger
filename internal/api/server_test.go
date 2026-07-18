@@ -174,13 +174,50 @@ func TestHandleSnapshotPOST(t *testing.T) {
 
 func TestHandleCreateRecord(t *testing.T) {
 	s := setupTestServer(t)
+
+	body, _ := json.Marshal(CreateRecordRequest{
+		Type:    "deployment",
+		Source:  "ci-pipeline",
+		Payload: "Deployed v1.2.3",
+	})
+	req := httptest.NewRequest("POST", "/api/v1/records", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected 201, got %d", w.Code)
+	}
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    RecordResponse
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Error("Expected success=true")
+	}
+	if resp.Data.ID == 0 {
+		t.Error("Expected a non-zero record id")
+	}
+	if resp.Data.Kind != "deployment" {
+		t.Errorf("Expected kind 'deployment', got %q", resp.Data.Kind)
+	}
+}
+
+func TestHandleCreateRecordValidation(t *testing.T) {
+	s := setupTestServer(t)
+	// Missing type and payload -> 400 Bad Request.
 	req := httptest.NewRequest("POST", "/api/v1/records", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotImplemented {
-		t.Errorf("Expected 501, got %d", w.Code)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400, got %d", w.Code)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -28,6 +29,17 @@ CREATE INDEX IF NOT EXISTS idx_ledger_records_ts ON ledger_records(ts);
 
 type Ledger struct {
 	db *sql.DB
+	wal *WAL
+	walSeq int64
+	walMu sync.Mutex
+}
+
+// OpenOptions configures how a Ledger is opened.
+type OpenOptions struct {
+	// WALPath enables a write-ahead log at the given path when non-empty.
+	WALPath string
+	// WALFsync forces an fsync after every WAL write when true.
+	WALFsync bool
 }
 
 type Record struct {
@@ -72,6 +84,13 @@ type ProofResult struct {
 }
 
 func Open(path string) (*Ledger, error) {
+	return OpenWithOptions(path, OpenOptions{})
+}
+
+// OpenWithOptions opens a ledger, optionally attaching a write-ahead log. When
+// a WAL is configured, any records left pending from a previous crash are
+// automatically recovered (replayed) before the ledger is returned.
+func OpenWithOptions(path string, opts OpenOptions) (*Ledger, error) {
 	if path == "" {
 		return nil, errors.New("db path required")
 	}
@@ -94,11 +113,55 @@ func Open(path string) (*Ledger, error) {
 		return nil, err
 	}
 
-	return &Ledger{db: db}, nil
+	l := &Ledger{db: db}
+
+	if opts.WALPath != "" {
+		wal, err := NewWAL(opts.WALPath, opts.WALFsync)
+		if err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		l.wal = wal
+		// Recover any records that were logged but not committed before a crash.
+		if err := l.RecoverWAL(); err != nil {
+			_ = wal.Close()
+			_ = db.Close()
+			return nil, err
+		}
+	}
+
+	return l, nil
+}
+
+// RecoverWAL replays any WAL entries that were not durably committed to the
+// database. It is called automatically by OpenWithOptions when a WAL is
+// configured. It is safe to call manually after re-attaching a WAL.
+func (l *Ledger) RecoverWAL() error {
+	if l == nil || l.wal == nil {
+		return nil
+	}
+	pending, err := l.wal.Recover()
+	if err != nil {
+		return err
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	// Replay in a single batch for efficiency.
+	if _, err := l.AppendBatch(pending); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (l *Ledger) Close() error {
-	if l == nil || l.db == nil {
+	if l == nil {
+		return nil
+	}
+	if l.wal != nil {
+		_ = l.wal.Close()
+	}
+	if l.db == nil {
 		return nil
 	}
 	return l.db.Close()
@@ -115,6 +178,13 @@ func (l *Ledger) Append(input RecordInput) (Record, error) {
 	}
 	if strings.TrimSpace(input.Payload) == "" {
 		return Record{}, errors.New("payload required")
+	}
+
+	// Write-ahead: persist the intent before mutating the database so a crash
+	// between this point and the DB commit can be recovered.
+	seq := l.nextWALSeq()
+	if err := l.walLog(seq, input); err != nil {
+		return Record{}, err
 	}
 
 	prevHash, err := l.lastHash()
@@ -137,7 +207,7 @@ func (l *Ledger) Append(input RecordInput) (Record, error) {
 		return Record{}, err
 	}
 
-	return Record{
+	rec := Record{
 		ID:        id,
 		Timestamp: input.Timestamp,
 		Type:      input.Type,
@@ -145,7 +215,40 @@ func (l *Ledger) Append(input RecordInput) (Record, error) {
 		Payload:   input.Payload,
 		Hash:      hash,
 		PrevHash:  prevHash,
-	}, nil
+	}
+
+	// Mark the WAL entry committed now that the DB row is durable.
+	_ = l.walMarkCommitted(seq)
+
+	return rec, nil
+}
+
+// nextWALSeq returns a process-unique, monotonically increasing sequence number
+// for WAL entries.
+func (l *Ledger) nextWALSeq() int64 {
+	if l.wal == nil {
+		return 0
+	}
+	l.walMu.Lock()
+	defer l.walMu.Unlock()
+	l.walSeq++
+	return l.walSeq
+}
+
+// walLog writes an entry to the WAL (no-op when WAL is disabled).
+func (l *Ledger) walLog(seq int64, input RecordInput) error {
+	if l.wal == nil {
+		return nil
+	}
+	return l.wal.Log(seq, input)
+}
+
+// walMarkCommitted marks a WAL entry as committed (no-op when WAL disabled).
+func (l *Ledger) walMarkCommitted(seq int64) error {
+	if l.wal == nil {
+		return nil
+	}
+	return l.wal.MarkCommitted(seq)
 }
 
 // AppendBatch appends multiple records in a single transaction for better performance
@@ -402,4 +505,49 @@ func scanRecord(row *sql.Row) (Record, error) {
 		return Record{}, err
 	}
 	return rec, nil
+}
+
+// MerkleRoot computes the current Merkle root over all record hashes in id
+// order. This provides a compact, tamper-evident summary of the entire ledger
+// that can be signed and published for external verification.
+func (l *Ledger) MerkleRoot() (string, error) {
+	records, err := l.List(ListQuery{Since: 0, Until: 1 << 62, Limit: 1 << 62})
+	if err != nil {
+		return "", err
+	}
+	tree := BuildMerkleTreeFromRecords(records)
+	return tree.Root(), nil
+}
+
+// MerkleProofFor returns an inclusion proof for the record with the given id.
+func (l *Ledger) MerkleProofFor(id int64) (MerkleProof, error) {
+	records, err := l.List(ListQuery{Since: 0, Until: 1 << 62, Limit: 1 << 62})
+	if err != nil {
+		return MerkleProof{}, err
+	}
+	sorted := make([]Record, len(records))
+	copy(sorted, records)
+	sortSliceByID(sorted)
+
+	idx := -1
+	for i, r := range sorted {
+		if r.ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return MerkleProof{}, errors.New("record not found")
+	}
+
+	tree := BuildMerkleTreeFromRecords(sorted)
+	return tree.GenerateProof(idx)
+}
+
+func sortSliceByID(recs []Record) {
+	for i := 1; i < len(recs); i++ {
+		for j := i; j > 0 && recs[j-1].ID > recs[j].ID; j-- {
+			recs[j-1], recs[j] = recs[j], recs[j-1]
+		}
+	}
 }

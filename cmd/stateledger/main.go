@@ -48,6 +48,12 @@ func main() {
 		runArtifact(os.Args[2:])
 	case "server":
 		runServer(os.Args[2:])
+	case "prove":
+		runProve(os.Args[2:])
+	case "merkle":
+		runMerkle(os.Args[2:])
+	case "compact":
+		runCompact(os.Args[2:])
 	default:
 		printUsage()
 		os.Exit(2)
@@ -56,7 +62,7 @@ func main() {
 
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "stateledger <command> [options]")
-	fmt.Fprintln(os.Stderr, "commands: init, collect, capture, manifest, append, query, verify, snapshot, advisory, audit, artifact, server")
+	fmt.Fprintln(os.Stderr, "commands: init, collect, capture, manifest, append, query, verify, snapshot, advisory, audit, artifact, server, prove, merkle, compact")
 }
 
 func defaultDBPath() string {
@@ -574,10 +580,114 @@ func runServer(args []string) {
 	}
 	defer l.Close()
 
+	// Ensure the schema exists so a freshly created container volume works
+	// without a separate `init` step.
+	if err := l.InitSchema(); err != nil {
+		fatal(err)
+	}
+
 	server := api.NewServer(l, *addr)
 	if err := server.Start(); err != nil {
 		fatal(err)
 	}
+}
+
+func runProve(args []string) {
+	fs := flag.NewFlagSet("prove", flag.ExitOnError)
+	dbPath := fs.String("db", defaultDBPath(), "path to ledger database")
+	id := fs.Int64("id", 0, "record id to prove inclusion for")
+	keyPath := fs.String("key", "data/ledger.key", "path to ed25519 signing key")
+	_ = fs.Parse(args)
+
+	if *id <= 0 {
+		fatal(errors.New("--id is required and must be > 0"))
+	}
+
+	l, err := ledger.Open(*dbPath)
+	if err != nil {
+		fatal(err)
+	}
+	defer l.Close()
+
+	proof, err := l.MerkleProofFor(*id)
+	if err != nil {
+		fatal(err)
+	}
+
+	// Attach a signed root so the proof can be verified against a trusted
+	// published root by an external party.
+	signed, err := l.SignedRootAt(*keyPath, time.Now().Unix())
+	if err != nil {
+		fatal(err)
+	}
+
+	out := map[string]interface{}{
+		"proof":      proof,
+		"signed_root": signed,
+		"verified":   ledger.VerifyProof(proof) && signed.Verify(),
+	}
+	enc, _ := json.MarshalIndent(out, "", "  ")
+	fmt.Println(string(enc))
+}
+
+func runMerkle(args []string) {
+	fs := flag.NewFlagSet("merkle", flag.ExitOnError)
+	dbPath := fs.String("db", defaultDBPath(), "path to ledger database")
+	_ = fs.Parse(args)
+
+	l, err := ledger.Open(*dbPath)
+	if err != nil {
+		fatal(err)
+	}
+	defer l.Close()
+
+	root, err := l.MerkleRoot()
+	if err != nil {
+		fatal(err)
+	}
+
+	last, err := l.LastID()
+	if err != nil {
+		fatal(err)
+	}
+
+	out := map[string]interface{}{
+		"merkle_root": root,
+		"last_id":     last,
+	}
+	enc, _ := json.MarshalIndent(out, "", "  ")
+	fmt.Println(string(enc))
+}
+
+func runCompact(args []string) {
+	fs := flag.NewFlagSet("compact", flag.ExitOnError)
+	dbPath := fs.String("db", defaultDBPath(), "path to ledger database")
+	keepLast := fs.Int64("keep-last", 0, "keep only the most recent N records")
+	keepSince := fs.Int64("keep-since", 0, "drop records older than this unix timestamp (seconds)")
+	rebuild := fs.Bool("rebuild", false, "force a full hash-chain rebuild")
+	_ = fs.Parse(args)
+
+	if *keepLast == 0 && *keepSince == 0 && !*rebuild {
+		fatal(errors.New("specify at least one of --keep-last, --keep-since, or --rebuild"))
+	}
+
+	l, err := ledger.Open(*dbPath)
+	if err != nil {
+		fatal(err)
+	}
+	defer l.Close()
+
+	res, err := l.Compact(ledger.CompactOptions{
+		KeepLastN:    *keepLast,
+		KeepSince:    *keepSince,
+		RebuildChain: *rebuild,
+	})
+	if err != nil {
+		fatal(err)
+	}
+
+	out, _ := json.MarshalIndent(res, "", "  ")
+	fmt.Println(string(out))
 }
 
 func fatal(err error) {

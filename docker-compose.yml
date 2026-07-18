@@ -1,0 +1,44 @@
+# UltraCache <-> StateLedger verifiable audit bridge demo.
+#
+# Brings up StateLedger (REST API + verifiable ledger) and UltraCache
+# (Redis-compatible cache) wired together via the audit bridge.
+#
+#   docker compose up -d
+#   redis-cli -h 127.0.0.1 -p 6379 SET user:1 "alice"
+#   curl -s http://127.0.0.1:8080/api/v1/records | jq '.data[] | select(.kind=="cache.audit")'
+#
+# Images are published to Docker Hub:
+#   docker.io/retr0xd/ultracache
+#   docker.io/retr0xd/stateledger
+
+services:
+  stateledger:
+    image: retr0xd/stateledger:latest
+    container_name: stateledger
+    ports:
+      - "8080:8080"
+    volumes:
+      - stateledger-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/stateledger", "query", "--id", "0"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  ultracache:
+    image: retr0xd/ultracache:latest
+    container_name: ultracache
+    ports:
+      - "6379:6379"
+    environment:
+      # Point the audit bridge at StateLedger.
+      ULTRACACHE_LEDGER_URL: "http://stateledger:8080"
+      ULTRACACHE_ADDR: "0.0.0.0:6379"
+    depends_on:
+      stateledger:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  stateledger-data:
