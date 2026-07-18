@@ -13,17 +13,19 @@ import (
 
 // Server handles HTTP requests for StateLedger API
 type Server struct {
-	ledger *ledger.Ledger
-	router *http.ServeMux
-	addr   string
+	ledger  *ledger.Ledger
+	router  *http.ServeMux
+	addr    string
+	metrics *Metrics
 }
 
 // NewServer creates a new API server
 func NewServer(l *ledger.Ledger, addr string) *Server {
 	s := &Server{
-		ledger: l,
-		addr:   addr,
-		router: http.NewServeMux(),
+		ledger:  l,
+		addr:    addr,
+		router:  http.NewServeMux(),
+		metrics: NewMetrics(),
 	}
 	s.setupRoutes()
 	return s
@@ -34,11 +36,16 @@ func (s *Server) setupRoutes() {
 	// Health check
 	s.router.HandleFunc("GET /health", s.handleHealth)
 
+	// Observability
+	s.router.HandleFunc("GET /metrics", s.handleMetrics)
+
 	// Ledger endpoints
 	s.router.HandleFunc("GET /api/v1/health", s.handleHealth)
+	s.router.HandleFunc("GET /api/v1/stats", s.handleStats)
 	s.router.HandleFunc("GET /api/v1/records", s.handleListRecords)
 	s.router.HandleFunc("GET /api/v1/records/{id}", s.handleGetRecord)
 	s.router.HandleFunc("POST /api/v1/records", s.handleCreateRecord)
+	s.router.HandleFunc("POST /api/v1/records/bulk", s.handleBulkCreate)
 	s.router.HandleFunc("GET /api/v1/verify", s.handleVerify)
 	s.router.HandleFunc("GET /api/v1/snapshot", s.handleSnapshot)
 	s.router.HandleFunc("POST /api/v1/snapshot", s.handleSnapshot)
@@ -116,6 +123,15 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	offset := 0
 
+	// Cursor-based pagination: when `cursor` is provided, use stable
+	// id-based pagination instead of offset pagination.
+	cursor := 0
+	if c := r.URL.Query().Get("cursor"); c != "" {
+		if val, err := strconv.Atoi(c); err == nil && val >= 0 {
+			cursor = val
+		}
+	}
+
 	// Parse query parameters
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if val, err := strconv.Atoi(l); err == nil && val > 0 && val <= 1000 {
@@ -126,6 +142,32 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 		if val, err := strconv.Atoi(o); err == nil && val >= 0 {
 			offset = val
 		}
+	}
+
+	if r.URL.Query().Get("cursor") != "" {
+		ledgerRecs, next, err := s.ledger.ListCursor(int64(cursor), limit)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+			return
+		}
+		var responses []RecordResponse
+		for _, rec := range ledgerRecs {
+			responses = append(responses, RecordResponse{
+				ID:        rec.ID,
+				Kind:      rec.Type,
+				Timestamp: time.Unix(rec.Timestamp, 0).Format(time.RFC3339),
+				Hash:      rec.Hash,
+				Payload:   rec.Payload,
+			})
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(SuccessResponse(map[string]interface{}{
+			"records": responses,
+			"limit":   limit,
+			"cursor":  next,
+		}))
+		return
 	}
 
 	// Get records from ledger
@@ -264,6 +306,111 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 		Hash:      rec.Hash,
 		Payload:   rec.Payload,
 	}))
+}
+
+// BulkCreateRequest is the body for POST /api/v1/records/bulk.
+type BulkCreateRequest struct {
+	Records []CreateRecordRequest `json:"records"`
+}
+
+// handleBulkCreate appends multiple records in a single transaction. This is
+// the high-throughput ingestion path used when many audit events arrive at
+// once (e.g. a batch of cache mutations from UltraCache).
+func (s *Server) handleBulkCreate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(ErrorResponse("Method not allowed"))
+		return
+	}
+
+	var req BulkCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorResponse("invalid JSON body"))
+		return
+	}
+
+	if len(req.Records) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorResponse("records array is required"))
+		return
+	}
+
+	inputs := make([]ledger.RecordInput, 0, len(req.Records))
+	for i, rec := range req.Records {
+		if strings.TrimSpace(rec.Type) == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse(fmt.Sprintf("records[%d].type is required", i)))
+			return
+		}
+		if strings.TrimSpace(rec.Payload) == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse(fmt.Sprintf("records[%d].payload is required", i)))
+			return
+		}
+		ts := rec.Time
+		if ts == 0 {
+			ts = time.Now().Unix()
+		}
+		inputs = append(inputs, ledger.RecordInput{
+			Timestamp: ts,
+			Type:      rec.Type,
+			Source:    rec.Source,
+			Payload:   rec.Payload,
+		})
+	}
+
+	created, err := s.ledger.AppendBatch(inputs)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		return
+	}
+
+	responses := make([]RecordResponse, 0, len(created))
+	for _, rec := range created {
+		responses = append(responses, RecordResponse{
+			ID:        rec.ID,
+			Kind:      rec.Type,
+			Timestamp: time.Unix(rec.Timestamp, 0).Format(time.RFC3339),
+			Hash:      rec.Hash,
+			Payload:   rec.Payload,
+		})
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(SuccessResponse(map[string]interface{}{
+		"records": responses,
+		"count":   len(responses),
+	}))
+}
+
+// handleStats returns a summary of the ledger's current state.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	stats, err := s.ledger.Stats()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(SuccessResponse(stats))
+}
+
+// handleMetrics exposes Prometheus-format metrics for scraping.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	if s.metrics == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(s.metrics.PrometheusMetrics()))
 }
 
 // handleVerify verifies ledger integrity

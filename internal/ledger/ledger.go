@@ -361,6 +361,82 @@ func (l *Ledger) List(q ListQuery) ([]Record, error) {
 	return out, rows.Err()
 }
 
+// LedgerStats summarizes the current state of the ledger.
+type LedgerStats struct {
+	RecordCount int64  `json:"record_count"`
+	LastID      int64  `json:"last_id"`
+	LastHash    string `json:"last_hash"`
+	MerkleRoot  string `json:"merkle_root"`
+}
+
+// Stats returns a summary of the ledger's current state.
+func (l *Ledger) Stats() (LedgerStats, error) {
+	var count int64
+	if err := l.db.QueryRow(`SELECT COUNT(*) FROM ledger_records`).Scan(&count); err != nil {
+		return LedgerStats{}, err
+	}
+
+	lastID, err := l.LastID()
+	if err != nil {
+		return LedgerStats{}, err
+	}
+
+	lastHash, err := l.lastHash()
+	if err != nil {
+		return LedgerStats{}, err
+	}
+
+	root, err := l.MerkleRoot()
+	if err != nil {
+		return LedgerStats{}, err
+	}
+
+	return LedgerStats{
+		RecordCount: count,
+		LastID:      lastID,
+		LastHash:    lastHash,
+		MerkleRoot:  root,
+	}, nil
+}
+
+// ListCursor returns records after the given cursor id (exclusive), limited to
+// `limit` entries. The returned `next` cursor is the id to pass for the next
+// page, or 0 when there are no more records. Cursor-based pagination is stable
+// even as new records are appended concurrently.
+func (l *Ledger) ListCursor(afterID int64, limit int) (records []Record, next int64, err error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+
+	rows, err := l.db.Query(
+		`SELECT id, ts, type, source, payload, hash, prev_hash FROM ledger_records WHERE id > ? ORDER BY id ASC LIMIT ?`,
+		afterID, limit+1,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []Record
+	for rows.Next() {
+		var rec Record
+		if err := rows.Scan(&rec.ID, &rec.Timestamp, &rec.Type, &rec.Source, &rec.Payload, &rec.Hash, &rec.PrevHash); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	next = 0
+	if len(out) > limit {
+		out = out[:limit]
+		next = out[len(out)-1].ID
+	}
+	return out, next, nil
+}
+
 func (l *Ledger) VerifyChain() (VerifyResult, error) {
 	rows, err := l.db.Query(`SELECT id, ts, type, source, payload, hash, prev_hash FROM ledger_records ORDER BY id ASC`)
 	if err != nil {
