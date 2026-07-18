@@ -893,6 +893,94 @@ A: Use the built-in stress testing tool: `go run ./cmd/stress-test -events=50000
 
 ---
 
+## Analysis: Usability, Security, Flexibility & Roadmap
+
+This section evaluates StateLedger across four axes and outlines where v2 should
+go. It is written for operators and architects deciding whether (and how) to
+adopt the project.
+
+### Usability
+
+- **Zero-config container start** — The `server` command now calls
+  `InitSchema()` automatically, so a fresh volume works without a separate
+  `init` step. The published image ships a default `CMD` of
+  `server --db /app/data/ledger.db --addr :8080`.
+- **Docker Hub images** — Prebuilt multi-arch images are published to
+  `docker.io/retr0xd/stateledger` (amd64 + arm64). Pull and run:
+  ```bash
+  docker pull retr0xd/stateledger:latest
+  docker run -p 8080:8080 -v $(pwd)/data:/app/data retr0xd/stateledger:latest
+  ```
+- **Compose demo** — `docker-compose.yml` in the repo root wires StateLedger
+  to UltraCache so you can see the audit bridge end-to-end in one command:
+  `docker compose up -d`.
+- **Healthchecks** — Both the image `HEALTHCHECK` and the compose file probe
+  `stateledger query --id 0`, giving orchestrators a real readiness signal.
+- **Pure-Go, no cgo** — `modernc.org/sqlite` means a single static binary with
+  no system SQLite dependency, simplifying cross-platform distribution.
+
+### Security
+
+- **Non-root by default** — The runtime image runs as UID `10001`
+  (`stateledger`), reducing blast radius if the process is compromised.
+- **Integrity, not confidentiality** — The hash chain, Merkle tree, and
+  Ed25519-signed roots prove records were not tampered with, but the payload is
+  stored in plaintext. Encrypt sensitive payloads *before* appending, or mount
+  an encrypted volume (see FAQ above).
+- **Transport** — The REST API is plain HTTP. Terminate TLS at a reverse proxy
+  (nginx, Envoy, or a service mesh) in production; do not expose port 8080
+  directly to untrusted networks.
+- **Auth** — API-key/JWT middleware exists; enable it and rotate keys out of
+  band. The UltraCache bridge should only reach StateLedger over a trusted
+  network segment or mTLS proxy.
+- **Supply chain** — Images are built from `go build -mod=vendor` using the
+  committed `vendor/` tree, so builds do not depend on the module proxy being
+  reachable or trustworthy at build time.
+
+### Flexibility
+
+- **Pluggable storage backends** — Records are keyed by `type`/`source`, so the
+  same ledger serves code, config, environment, mutation, and `cache.audit`
+  events without schema changes.
+- **Config via flags or env** — `STATELEDGER_DB` selects the database path; the
+  server address is a flag. The bridge side consumes `ULTRACACHE_LEDGER_URL`.
+- **Compaction knobs** — `compact --keep-last N`, `--keep-since T`, or
+  `--rebuild` let operators bound storage growth while preserving chain
+  verifiability (the chain is rebuilt and re-verifiable after pruning).
+- **Verification tooling** — `verify`, `prove`, `merkle`, and `snapshot` cover
+  local audit, third-party inclusion proofs, and point-in-time reconstruction.
+
+### v2 Improvement Spots
+
+1. **Encryption at rest** — Native AES-GCM or age-encrypted payloads with key
+   rotation, so confidentiality is first-class rather than a user responsibility.
+2. **Replication / clustering** — Leader-follower or Raft-based replication so a
+   single SQLite file is not the durability ceiling.
+3. **Metrics & dashboards** — Expose Prometheus counters (already partially
+   present) behind a `/metrics` endpoint and ship a Grafana dashboard.
+4. **Web UI** — A read-only explorer for records, Merkle proofs, and signed
+   roots to lower the verification barrier for non-CLI users.
+5. **Retention policies** — Declarative TTL/compaction policies instead of
+   manual `compact` runs.
+6. **Signed audit streaming** — Stream `cache.audit` (and other) records to
+   external SIEM/log pipelines with detached signatures for continuous
+   verification.
+
+### Best Use Cases
+
+- **Compliance & audit trails** — Immutable, verifiable history for regulated
+  workloads (finance, healthcare, infra change tracking).
+- **Cache/state provenance** — Paired with UltraCache, every mutating command
+  becomes a tamper-evident `cache.audit` record for forensic replay.
+- **Disaster recovery** — `snapshot` + `verify` reconstruct exact system state
+  at any timestamp after an incident.
+- **Supply-chain attestation** — Signed Merkle roots published to a transparency
+  log let downstream consumers verify build/state artifacts.
+- **Single-node durability** — Ideal when you need strong integrity guarantees
+  without standing up a distributed database.
+
+---
+
 ## License
 
 Apache 2.0 - see LICENSE file for details.
