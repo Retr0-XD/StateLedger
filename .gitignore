@@ -46,3 +46,7 @@ coverage.html
 
 # CI/CD artifacts
 /.github/workflows/test-results/
+
+# Coverage
+coverage.txt
+coverage
