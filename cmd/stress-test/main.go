@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,7 +23,6 @@ type StressTestConfig struct {
 type StressTest struct {
 	config        StressTestConfig
 	ledger        *ledger.Ledger
-	mu            sync.Mutex
 	createdEvents int64
 	failedEvents  int64
 	totalLatency  int64

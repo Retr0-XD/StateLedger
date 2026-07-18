@@ -98,7 +98,7 @@ func (l *Ledger) prune(opts CompactOptions) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var removed int64
 
@@ -141,7 +141,7 @@ func (l *Ledger) rebuildChain() error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx, `SELECT id, ts, type, source, payload FROM ledger_records ORDER BY id ASC`)
 	if err != nil {

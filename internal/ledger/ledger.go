@@ -261,7 +261,7 @@ func (l *Ledger) AppendBatch(inputs []RecordInput) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	prevHash, err := l.lastHashTx(tx)
 	if err != nil {

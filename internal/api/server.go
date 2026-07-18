@@ -88,10 +88,16 @@ func SuccessResponse(data interface{}) *Response {
 	}
 }
 
+// writeJSON encodes resp as JSON to w. Encoding errors are non-fatal (the
+// connection is already being torn down), so the returned error is ignored.
+func writeJSON(w http.ResponseWriter, resp *Response) {
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // handleHealth returns server health status
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(SuccessResponse(map[string]string{
+	writeJSON(w, SuccessResponse(map[string]string{
 		"status": "healthy",
 		"time":   time.Now().UTC().Format(time.RFC3339),
 	}))
@@ -148,7 +154,7 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 		ledgerRecs, next, err := s.ledger.ListCursor(int64(cursor), limit)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+			writeJSON(w, ErrorResponse(err.Error()))
 			return
 		}
 		var responses []RecordResponse
@@ -162,7 +168,7 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SuccessResponse(map[string]interface{}{
+		writeJSON(w, SuccessResponse(map[string]interface{}{
 			"records": responses,
 			"limit":   limit,
 			"cursor":  next,
@@ -178,7 +184,7 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		writeJSON(w, ErrorResponse(err.Error()))
 		return
 	}
 
@@ -206,7 +212,7 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(SuccessResponse(map[string]interface{}{
+	writeJSON(w, SuccessResponse(map[string]interface{}{
 		"records": responses,
 		"offset":  offset,
 		"limit":   limit,
@@ -222,19 +228,19 @@ func (s *Server) handleGetRecord(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse("Invalid record ID"))
+		writeJSON(w, ErrorResponse("Invalid record ID"))
 		return
 	}
 
 	rec, err := s.ledger.GetByID(id)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(ErrorResponse("Record not found"))
+		writeJSON(w, ErrorResponse("Record not found"))
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(SuccessResponse(RecordResponse{
+	writeJSON(w, SuccessResponse(RecordResponse{
 		ID:        rec.ID,
 		Kind:      rec.Type,
 		Timestamp: time.Unix(rec.Timestamp, 0).Format(time.RFC3339),
@@ -259,25 +265,25 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse("Method not allowed"))
+		writeJSON(w, ErrorResponse("Method not allowed"))
 		return
 	}
 
 	var req CreateRecordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse("invalid JSON body"))
+		writeJSON(w, ErrorResponse("invalid JSON body"))
 		return
 	}
 
 	if strings.TrimSpace(req.Type) == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse("type is required"))
+		writeJSON(w, ErrorResponse("type is required"))
 		return
 	}
 	if strings.TrimSpace(req.Payload) == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse("payload is required"))
+		writeJSON(w, ErrorResponse("payload is required"))
 		return
 	}
 
@@ -294,12 +300,12 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		writeJSON(w, ErrorResponse(err.Error()))
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(SuccessResponse(RecordResponse{
+	writeJSON(w, SuccessResponse(RecordResponse{
 		ID:        rec.ID,
 		Kind:      rec.Type,
 		Timestamp: time.Unix(rec.Timestamp, 0).Format(time.RFC3339),
@@ -321,20 +327,20 @@ func (s *Server) handleBulkCreate(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse("Method not allowed"))
+		writeJSON(w, ErrorResponse("Method not allowed"))
 		return
 	}
 
 	var req BulkCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse("invalid JSON body"))
+		writeJSON(w, ErrorResponse("invalid JSON body"))
 		return
 	}
 
 	if len(req.Records) == 0 {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse("records array is required"))
+		writeJSON(w, ErrorResponse("records array is required"))
 		return
 	}
 
@@ -342,12 +348,12 @@ func (s *Server) handleBulkCreate(w http.ResponseWriter, r *http.Request) {
 	for i, rec := range req.Records {
 		if strings.TrimSpace(rec.Type) == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(ErrorResponse(fmt.Sprintf("records[%d].type is required", i)))
+			writeJSON(w, ErrorResponse(fmt.Sprintf("records[%d].type is required", i)))
 			return
 		}
 		if strings.TrimSpace(rec.Payload) == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(ErrorResponse(fmt.Sprintf("records[%d].payload is required", i)))
+			writeJSON(w, ErrorResponse(fmt.Sprintf("records[%d].payload is required", i)))
 			return
 		}
 		ts := rec.Time
@@ -365,7 +371,7 @@ func (s *Server) handleBulkCreate(w http.ResponseWriter, r *http.Request) {
 	created, err := s.ledger.AppendBatch(inputs)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		writeJSON(w, ErrorResponse(err.Error()))
 		return
 	}
 
@@ -381,7 +387,7 @@ func (s *Server) handleBulkCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(SuccessResponse(map[string]interface{}{
+	writeJSON(w, SuccessResponse(map[string]interface{}{
 		"records": responses,
 		"count":   len(responses),
 	}))
@@ -394,12 +400,12 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := s.ledger.Stats()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		writeJSON(w, ErrorResponse(err.Error()))
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(SuccessResponse(stats))
+	writeJSON(w, SuccessResponse(stats))
 }
 
 // handleMetrics exposes Prometheus-format metrics for scraping.
@@ -410,7 +416,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(s.metrics.PrometheusMetrics()))
+	_, _ = w.Write([]byte(s.metrics.PrometheusMetrics()))
 }
 
 // handleVerify verifies ledger integrity
@@ -420,12 +426,12 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	result, err := s.ledger.VerifyChain()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		writeJSON(w, ErrorResponse(err.Error()))
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(SuccessResponse(map[string]interface{}{
+	writeJSON(w, SuccessResponse(map[string]interface{}{
 		"valid":     result.OK,
 		"checked":   result.Checked,
 		"failed_id": result.FailedID,
@@ -446,7 +452,7 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost && r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse("Method not allowed"))
+		writeJSON(w, ErrorResponse("Method not allowed"))
 		return
 	}
 
@@ -464,12 +470,12 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		writeJSON(w, ErrorResponse(err.Error()))
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(SuccessResponse(map[string]interface{}{
+	writeJSON(w, SuccessResponse(map[string]interface{}{
 		"time":    targetTime.Format(time.RFC3339),
 		"records": records,
 		"count":   len(records),
@@ -483,11 +489,11 @@ func (s *Server) handleMerkleRoot(w http.ResponseWriter, r *http.Request) {
 	root, err := s.ledger.MerkleRoot()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		writeJSON(w, ErrorResponse(err.Error()))
 		return
 	}
 
-	json.NewEncoder(w).Encode(SuccessResponse(map[string]string{
+	writeJSON(w, SuccessResponse(map[string]string{
 		"merkle_root": root,
 	}))
 }
@@ -500,18 +506,18 @@ func (s *Server) handleProof(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse("invalid id"))
+		writeJSON(w, ErrorResponse("invalid id"))
 		return
 	}
 
 	proof, err := s.ledger.MerkleProofFor(id)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		writeJSON(w, ErrorResponse(err.Error()))
 		return
 	}
 
-	json.NewEncoder(w).Encode(SuccessResponse(proof))
+	writeJSON(w, SuccessResponse(proof))
 }
 
 // handleSignedRoot returns a signed Merkle root for external verification.
@@ -526,9 +532,9 @@ func (s *Server) handleSignedRoot(w http.ResponseWriter, r *http.Request) {
 	signed, err := s.ledger.SignedRootAt(keyPath, time.Now().Unix())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse(err.Error()))
+		writeJSON(w, ErrorResponse(err.Error()))
 		return
 	}
 
-	json.NewEncoder(w).Encode(SuccessResponse(signed))
+	writeJSON(w, SuccessResponse(signed))
 }
