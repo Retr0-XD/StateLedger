@@ -49,6 +49,21 @@ StateLedger captures, stores, and verifies system state with SHA-256 hash chain 
 - **Prometheus Metrics** - Observable performance metrics
 - **REST API** - Programmatic access to ledger operations
 
+### Durability & Verifiability
+
+- **Write-Ahead Log (WAL)** - Crash-safe appends; uncommitted entries are
+  replayed on reopen so no acknowledged record is lost after a crash.
+- **Merkle Tree** - Build a Merkle root over all records and generate/verify
+  inclusion proofs for any record id.
+- **Signed Roots** - Ed25519-signed Merkle roots (`prove`/`merkle` CLI) so a
+  third party can verify the ledger state against a known public key.
+- **Compaction** - Prune old records by count (`--keep-last N`) or age
+  (`--keep-since T`) and automatically rebuild the hash chain so it stays
+  consistent and verifiable.
+- **UltraCache Bridge** - Receives verifiable `cache.audit` records from
+  [UltraCache](https://github.com/Retr0-XD/UltraCache), turning the cache into
+  a tamper-evident, auditable data plane.
+
 ### Deployment
 
 - **Docker** - Multi-stage, multi-platform support (amd64/arm64)
@@ -138,6 +153,76 @@ Status: VALID
 ./stateledger audit --db data/ledger.db --out audit.json.gz
 ```
 
+#### 6. Merkle Root & Signed Proofs
+
+StateLedger can build a Merkle tree over all records and produce Ed25519-signed
+roots, so a third party can verify the ledger state against a known public key.
+
+```bash
+# Print the current Merkle root and last record id
+./stateledger merkle --db data/ledger.db
+
+# Generate an inclusion proof + signed root for a specific record
+./stateledger prove --db data/ledger.db --id 42 --key data/ledger.key
+```
+
+`prove` prints the Merkle inclusion proof, the signed root, and a `verified: true`
+line when the proof validates against the key. Keys are auto-generated on first
+use and stored at the path given by `--key` (default `data/ledger.key`).
+
+#### 7. Compaction (bounded storage)
+
+Prune old records and keep the chain verifiable:
+
+```bash
+# Keep only the last 1000 records
+./stateledger compact --db data/ledger.db --keep-last 1000
+
+# Keep only records newer than a timestamp (RFC3339)
+./stateledger compact --db data/ledger.db --keep-since 2025-01-01T00:00:00Z
+```
+
+Pruning always triggers a hash-chain rebuild so the remaining records stay
+consistent and verifiable.
+
+---
+
+## Integration: UltraCache Verifiable Audit Bridge
+
+[UltraCache](https://github.com/Retr0-XD/UltraCache) is a multi-tenant,
+Redis-compatible in-memory cache. When started with `--ledger-url
+http://<stateledger-host>:8080`, it emits a `cache.audit` record to StateLedger
+for every mutating command (`SET`, `DEL`, `INCR`, `HSET`, ...). Because
+StateLedger appends each event to its hash chain, the cache's mutation history
+becomes **tamper-evident and Merkle-provable**.
+
+End-to-end flow:
+
+```bash
+# 1. Start StateLedger
+./stateledger server --db data/ledger.db --addr :8080
+
+# 2. Start UltraCache with the bridge enabled
+./ultracache --ledger-url http://localhost:8080
+
+# 3. Issue cache commands (e.g. via redis-cli)
+redis-cli SET user:1 "alice"
+redis-cli INCR visits
+
+# 4. Verify the audit trail in StateLedger
+curl "http://localhost:8080/api/v1/records?type=cache.audit&limit=10"
+./stateledger merkle --db data/ledger.db
+```
+
+Each `cache.audit` record has a JSON payload of the form:
+
+```json
+{ "tenant": "acme", "command": "SET", "key": "user:1", "summary": "SET user:1 alice" }
+```
+
+The bridge is best-effort and non-blocking: if StateLedger is unreachable, the
+cache operation still succeeds and the event is dropped (logged to stderr).
+
 ---
 
 ## Installation
@@ -197,6 +282,8 @@ go install github.com/Retr0-XD/StateLedger/cmd/stateledger@latest
 | `capture` | Capture environment/config | `stateledger capture --kind environment` |
 | `advisory` | Determinism analysis | `stateledger advisory --db ledger.db` |
 | `server` | Start REST API server | `stateledger server --db ledger.db --addr :8080` |
+| `prove` | Generate a Merkle inclusion proof + signed root for a record | `stateledger prove --db ledger.db --id 42` |
+| `merkle` | Print the current Merkle root and last record id | `stateledger merkle --db ledger.db` |
 
 ### REST API
 
@@ -522,7 +609,11 @@ spec:
 ### Core Components
 
 #### Ledger Engine (`internal/ledger/`)
-- **ledger.go** - Core append-only ledger with ACID transactions
+- **ledger.go** - Core append-only ledger with ACID transactions, WAL integration
+- **wal.go** - Write-ahead log for crash-safe appends and recovery
+- **compaction.go** - Pruning + hash-chain rebuild for bounded storage
+- **merkle.go** - Merkle tree, inclusion proofs, and Ed25519-signed roots
+- **keys.go** - Ed25519 key generation/loading and signed-root helpers
 - **reconstruction.go** - Point-in-time state reconstruction
 - **cache.go** - In-memory TTL-based caching layer
 - **compression.go** - Gzip compression utilities
@@ -799,6 +890,94 @@ A: The ledger uses SHA-256 hashing for integrity but not encryption. For sensiti
 
 **Q: How do I stress test the system?**  
 A: Use the built-in stress testing tool: `go run ./cmd/stress-test -events=50000 -batch=500`. This generates 50,000 events, verifies chain integrity, and tests state recovery.
+
+---
+
+## Analysis: Usability, Security, Flexibility & Roadmap
+
+This section evaluates StateLedger across four axes and outlines where v2 should
+go. It is written for operators and architects deciding whether (and how) to
+adopt the project.
+
+### Usability
+
+- **Zero-config container start** — The `server` command now calls
+  `InitSchema()` automatically, so a fresh volume works without a separate
+  `init` step. The published image ships a default `CMD` of
+  `server --db /app/data/ledger.db --addr :8080`.
+- **Docker Hub images** — Prebuilt multi-arch images are published to
+  `docker.io/retr0xd/stateledger` (amd64 + arm64). Pull and run:
+  ```bash
+  docker pull retr0xd/stateledger:latest
+  docker run -p 8080:8080 -v $(pwd)/data:/app/data retr0xd/stateledger:latest
+  ```
+- **Compose demo** — `docker-compose.yml` in the repo root wires StateLedger
+  to UltraCache so you can see the audit bridge end-to-end in one command:
+  `docker compose up -d`.
+- **Healthchecks** — Both the image `HEALTHCHECK` and the compose file probe
+  `stateledger query --id 0`, giving orchestrators a real readiness signal.
+- **Pure-Go, no cgo** — `modernc.org/sqlite` means a single static binary with
+  no system SQLite dependency, simplifying cross-platform distribution.
+
+### Security
+
+- **Non-root by default** — The runtime image runs as UID `10001`
+  (`stateledger`), reducing blast radius if the process is compromised.
+- **Integrity, not confidentiality** — The hash chain, Merkle tree, and
+  Ed25519-signed roots prove records were not tampered with, but the payload is
+  stored in plaintext. Encrypt sensitive payloads *before* appending, or mount
+  an encrypted volume (see FAQ above).
+- **Transport** — The REST API is plain HTTP. Terminate TLS at a reverse proxy
+  (nginx, Envoy, or a service mesh) in production; do not expose port 8080
+  directly to untrusted networks.
+- **Auth** — API-key/JWT middleware exists; enable it and rotate keys out of
+  band. The UltraCache bridge should only reach StateLedger over a trusted
+  network segment or mTLS proxy.
+- **Supply chain** — Images are built from `go build -mod=vendor` using the
+  committed `vendor/` tree, so builds do not depend on the module proxy being
+  reachable or trustworthy at build time.
+
+### Flexibility
+
+- **Pluggable storage backends** — Records are keyed by `type`/`source`, so the
+  same ledger serves code, config, environment, mutation, and `cache.audit`
+  events without schema changes.
+- **Config via flags or env** — `STATELEDGER_DB` selects the database path; the
+  server address is a flag. The bridge side consumes `ULTRACACHE_LEDGER_URL`.
+- **Compaction knobs** — `compact --keep-last N`, `--keep-since T`, or
+  `--rebuild` let operators bound storage growth while preserving chain
+  verifiability (the chain is rebuilt and re-verifiable after pruning).
+- **Verification tooling** — `verify`, `prove`, `merkle`, and `snapshot` cover
+  local audit, third-party inclusion proofs, and point-in-time reconstruction.
+
+### v2 Improvement Spots
+
+1. **Encryption at rest** — Native AES-GCM or age-encrypted payloads with key
+   rotation, so confidentiality is first-class rather than a user responsibility.
+2. **Replication / clustering** — Leader-follower or Raft-based replication so a
+   single SQLite file is not the durability ceiling.
+3. **Metrics & dashboards** — Expose Prometheus counters (already partially
+   present) behind a `/metrics` endpoint and ship a Grafana dashboard.
+4. **Web UI** — A read-only explorer for records, Merkle proofs, and signed
+   roots to lower the verification barrier for non-CLI users.
+5. **Retention policies** — Declarative TTL/compaction policies instead of
+   manual `compact` runs.
+6. **Signed audit streaming** — Stream `cache.audit` (and other) records to
+   external SIEM/log pipelines with detached signatures for continuous
+   verification.
+
+### Best Use Cases
+
+- **Compliance & audit trails** — Immutable, verifiable history for regulated
+  workloads (finance, healthcare, infra change tracking).
+- **Cache/state provenance** — Paired with UltraCache, every mutating command
+  becomes a tamper-evident `cache.audit` record for forensic replay.
+- **Disaster recovery** — `snapshot` + `verify` reconstruct exact system state
+  at any timestamp after an incident.
+- **Supply-chain attestation** — Signed Merkle roots published to a transparency
+  log let downstream consumers verify build/state artifacts.
+- **Single-node durability** — Ideal when you need strong integrity guarantees
+  without standing up a distributed database.
 
 ---
 

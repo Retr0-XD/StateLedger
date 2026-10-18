@@ -1,0 +1,15 @@
+.git
+.github
+.vscode
+*.md
+docs/
+examples/
+tests/
+testdata/
+dist/
+coverage.txt
+*.log
+server.log
+artifacts/
+data/
+.DS_Store

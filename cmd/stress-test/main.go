@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,7 +23,6 @@ type StressTestConfig struct {
 type StressTest struct {
 	config        StressTestConfig
 	ledger        *ledger.Ledger
-	mu            sync.Mutex
 	createdEvents int64
 	failedEvents  int64
 	totalLatency  int64
@@ -91,7 +89,7 @@ func main() {
 
 	// Allow database to settle
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Close and reopen to ensure all writes are flushed
 	sl.Close()
 	sl, err = ledger.Open(dbPath)

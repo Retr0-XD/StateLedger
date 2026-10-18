@@ -17,11 +17,11 @@ type Metrics struct {
 	maxDurationsCount int
 
 	// Endpoint-specific metrics
-	healthChecks      atomic.Uint64
-	listRecords       atomic.Uint64
-	getRecord         atomic.Uint64
-	verifyChain       atomic.Uint64
-	snapshots         atomic.Uint64
+	healthChecks atomic.Uint64
+	listRecords  atomic.Uint64
+	getRecord    atomic.Uint64
+	verifyChain  atomic.Uint64
+	snapshots    atomic.Uint64
 }
 
 // NewMetrics creates a new metrics tracker

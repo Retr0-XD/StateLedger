@@ -91,9 +91,7 @@ func getGitRepoName(repoPath string) (string, error) {
 		return filepath.Base(strings.TrimSpace(string(output))), nil
 	}
 	url := strings.TrimSpace(string(output))
-	if strings.HasSuffix(url, ".git") {
-		url = url[:len(url)-4]
-	}
+	url = strings.TrimSuffix(url, ".git")
 	return filepath.Base(url), nil
 }
 

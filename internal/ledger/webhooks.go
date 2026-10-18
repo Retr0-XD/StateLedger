@@ -2,6 +2,9 @@ package ledger
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,11 +21,11 @@ type WebhookEvent struct {
 
 // WebhookManager manages webhook subscriptions and delivery
 type WebhookManager struct {
-	mu           sync.RWMutex
+	mu            sync.RWMutex
 	subscriptions map[string]*Subscription
-	httpClient   *http.Client
-	maxRetries   int
-	retryDelay   time.Duration
+	httpClient    *http.Client
+	maxRetries    int
+	retryDelay    time.Duration
 }
 
 // Subscription represents a webhook subscription
@@ -124,9 +127,9 @@ func (wm *WebhookManager) deliverWebhook(sub *Subscription, event WebhookEvent) 
 
 		// Add HMAC signature if secret is provided
 		if sub.Secret != "" {
-			// TODO: Implement HMAC signature
-			// sig := hmac256(sub.Secret, payload)
-			// req.Header.Set("X-Signature", sig)
+			mac := hmac.New(sha256.New, []byte(sub.Secret))
+			mac.Write(payload)
+			req.Header.Set("X-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 		}
 
 		resp, err := wm.httpClient.Do(req)

@@ -492,7 +492,7 @@ func writeJSON(w http.ResponseWriter, status int, payload APIResponse) {
 
 func contains(s, substr string) bool {
 	for i := 0; i < len(s); i++ {
-		if s[i : i+1] == substr[0:1] {
+		if s[i:i+1] == substr[0:1] {
 			if len(s[i:]) >= len(substr) && s[i:i+len(substr)] == substr {
 				return true
 			}
